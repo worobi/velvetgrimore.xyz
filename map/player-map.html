@@ -1,0 +1,391 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Velvet Grimoire — Player Map</title>
+<link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@400;600&family=Crimson+Pro:ital,wght@0,400;1,400&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#07050a;--surface:#100d14;--surface2:#16121e;
+  --border:rgba(140,100,200,0.18);--border-hot:rgba(180,140,240,0.45);
+  --purple:#9966cc;--purple-dim:#5a3380;--gold:#c8a060;
+  --text:#ddd0f0;--text-dim:#8070a0;--text-muted:#302040;
+}
+*{box-sizing:border-box;margin:0;padding:0;}
+body{background:var(--bg);color:var(--text);font-family:'Crimson Pro',serif;height:100vh;display:flex;flex-direction:column;overflow:hidden;}
+
+.header{background:var(--surface);border-bottom:1px solid var(--border);padding:10px 20px;display:flex;align-items:center;justify-content:space-between;flex-shrink:0;}
+.header-title{font-family:'Cinzel',serif;font-size:14px;color:var(--gold);letter-spacing:2px;}
+.header-sub{font-size:12px;color:var(--text-dim);font-style:italic;}
+.header-right{display:flex;gap:8px;align-items:center;}
+
+.map-wrap{flex:1;overflow:hidden;position:relative;display:flex;align-items:center;justify-content:center;background:radial-gradient(ellipse at 50% 50%,rgba(90,40,140,0.08) 0%,transparent 70%);}
+#playerCanvas{image-rendering:pixelated;cursor:default;}
+
+.controls{background:var(--surface);border-top:1px solid var(--border);padding:12px 20px;display:flex;align-items:center;justify-content:space-between;flex-shrink:0;}
+.dpad{display:grid;grid-template-columns:repeat(3,36px);grid-template-rows:repeat(3,36px);gap:3px;}
+.dpad-btn{width:36px;height:36px;background:rgba(140,100,200,0.12);border:1px solid var(--border);border-radius:4px;color:var(--text-dim);cursor:pointer;font-size:16px;display:flex;align-items:center;justify-content:center;transition:all .15s;font-family:sans-serif;}
+.dpad-btn:hover{background:rgba(140,100,200,0.25);border-color:var(--border-hot);color:var(--text);}
+.dpad-btn:active{transform:scale(0.92);}
+.dpad-center{background:rgba(140,100,200,0.2);border-color:var(--purple-dim);color:var(--purple);}
+
+.info-panel{flex:1;padding:0 24px;max-width:400px;}
+.info-title{font-family:'Cinzel',serif;font-size:13px;color:var(--gold);margin-bottom:6px;}
+.info-body{font-size:14px;color:var(--text-dim);line-height:1.6;font-style:italic;}
+
+.event-banner{position:absolute;top:20px;left:50%;transform:translateX(-50%);z-index:10;background:var(--surface);border:1px solid var(--border-hot);border-radius:6px;padding:16px 20px;width:360px;max-width:90vw;box-shadow:0 8px 40px rgba(0,0,0,0.8);animation:slideDown .3s ease;}
+@keyframes slideDown{from{opacity:0;transform:translateX(-50%) translateY(-16px)}to{opacity:1;transform:translateX(-50%) translateY(0)}}
+.event-banner-type{font-size:10px;letter-spacing:3px;text-transform:uppercase;margin-bottom:6px;}
+.event-banner-title{font-family:'Cinzel',serif;font-size:17px;color:var(--text);margin-bottom:8px;}
+.event-banner-desc{font-size:14px;color:var(--text-dim);line-height:1.6;font-style:italic;margin-bottom:12px;}
+
+.btn{display:inline-flex;align-items:center;gap:6px;padding:7px 14px;border-radius:3px;cursor:pointer;font-family:'Cinzel',serif;font-size:10px;letter-spacing:2px;text-transform:uppercase;border:1px solid;transition:all .15s;}
+.btn-ghost{background:transparent;border-color:var(--border);color:var(--text-dim);}
+.btn-ghost:hover{border-color:var(--border-hot);color:var(--text);}
+.btn-purple{background:rgba(90,40,140,0.25);border-color:var(--purple-dim);color:#cc99ff;}
+.btn-gold{background:rgba(200,160,96,0.15);border-color:rgba(200,160,96,0.4);color:var(--gold);}
+
+.zoom-ctrl{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--text-dim);}
+.legend{display:flex;flex-wrap:wrap;gap:10px;font-size:11px;color:var(--text-muted);}
+.legend-item{display:flex;align-items:center;gap:4px;}
+.legend-dot{width:10px;height:10px;border-radius:50%;}
+
+.status-bar-bottom{background:rgba(7,5,10,0.9);border-top:1px solid var(--border);padding:6px 20px;display:flex;gap:16px;font-size:12px;color:var(--text-muted);flex-shrink:0;}
+
+::-webkit-scrollbar{width:4px;}::-webkit-scrollbar-thumb{background:var(--text-muted);border-radius:2px;}
+</style>
+</head>
+<body>
+
+<div class="header">
+  <div>
+    <div class="header-title" id="mapTitle">The Unknown</div>
+    <div class="header-sub" id="npcLabel">NPC Player View — Fog of War Active</div>
+  </div>
+  <div class="header-right">
+    <div class="zoom-ctrl">
+      <span>Zoom:</span>
+      <input type="range" min="0.4" max="2.5" step="0.1" value="1" id="zoomSlider" oninput="setZoom(+this.value)" style="width:70px;accent-color:var(--purple);">
+      <span id="zoomVal">1×</span>
+    </div>
+    <button class="btn btn-ghost" onclick="fitToView()">⊙ Fit</button>
+    <button class="btn btn-ghost" onclick="refreshMap()">🔄</button>
+  </div>
+</div>
+
+<div class="map-wrap" id="mapWrap">
+  <canvas id="playerCanvas"></canvas>
+  <div id="eventBanner" style="display:none;"></div>
+</div>
+
+<div class="controls">
+  <div class="dpad">
+    <div></div>
+    <button class="dpad-btn" onclick="requestMove(0,-1)" title="North">↑</button>
+    <div></div>
+    <button class="dpad-btn" onclick="requestMove(-1,0)" title="West">←</button>
+    <button class="dpad-btn dpad-center" title="Position">◉</button>
+    <button class="dpad-btn" onclick="requestMove(1,0)" title="East">→</button>
+    <div></div>
+    <button class="dpad-btn" onclick="requestMove(0,1)" title="South">↓</button>
+    <div></div>
+  </div>
+
+  <div class="info-panel">
+    <div class="info-title" id="infoTitle">Exploring...</div>
+    <div class="info-body" id="infoBody">Use the D-Pad or arrow keys to move. The DM can also move the party.</div>
+  </div>
+
+  <div style="display:flex;flex-direction:column;gap:8px;align-items:flex-end;">
+    <div class="legend">
+      <div class="legend-item"><div class="legend-dot" style="background:#9966cc;"></div>Party</div>
+      <div class="legend-item"><div class="legend-dot" style="background:#c8a060;"></div>Scene</div>
+      <div class="legend-item"><div class="legend-dot" style="background:#cc3322;"></div>Combat</div>
+      <div class="legend-item"><div class="legend-dot" style="background:#22aa44;"></div>Loot</div>
+      <div class="legend-item"><div class="legend-dot" style="background:#446688;"></div>Rest</div>
+      <div class="legend-item"><div class="legend-dot" style="background:rgba(0,0,0,0.8);border:1px solid #444;"></div>Fog</div>
+    </div>
+    <div style="font-size:12px;color:var(--text-muted);">Auto-refresh: <span id="refreshCountdown">8s</span></div>
+  </div>
+</div>
+
+<div class="status-bar-bottom">
+  <span>Party: <strong id="partyPos" style="color:var(--purple);">—</strong></span>
+  <span>Zone: <strong id="currentZone" style="color:var(--gold);">—</strong></span>
+  <span>Tiles Revealed: <strong id="revealCount" style="color:var(--text-dim);">0</strong></span>
+  <span id="moveStatus" style="color:var(--text-dim);"></span>
+</div>
+
+<script src="../engine/engine.js"></script>
+<script src="../engine/map-engine.js"></script>
+<script>
+
+let activeMap = null;
+let zoom = 1;
+let countdown = 8;
+let pendingMove = null;
+
+const canvas = document.getElementById('playerCanvas');
+const ctx = canvas.getContext('2d');
+const TILE_SIZE = 40;
+
+function init() {
+  const mapId = localStorage.getItem('vg_active_map_id');
+  if (mapId) {
+    activeMap = VGMap.getMap(mapId);
+  }
+  if (!activeMap) {
+    const maps = VGMap.getMaps();
+    if (maps.length) activeMap = maps[0];
+  }
+  if (activeMap) { render(); fitToView(); }
+  else { showNoMap(); }
+
+  // Load session for context
+  if (window.VGEngine) VGEngine.resumeSession();
+
+  setupInput();
+  startRefreshTimer();
+}
+
+function refreshMap() {
+  if (!activeMap) return;
+  const fresh = VGMap.getMap(activeMap.id);
+  if (fresh) { activeMap = fresh; render(); updateStatus(); }
+  countdown = 8;
+}
+
+function startRefreshTimer() {
+  setInterval(() => {
+    countdown--;
+    document.getElementById('refreshCountdown').textContent = countdown + 's';
+    if (countdown <= 0) { refreshMap(); countdown = 8; }
+  }, 1000);
+}
+
+function render() {
+  if (!activeMap) return;
+  const ts = Math.round(TILE_SIZE * zoom);
+  canvas.width = activeMap.cols * ts;
+  canvas.height = activeMap.rows * ts;
+
+  const biome = VGMap.ZONE_BIOMES[activeMap.biome] || VGMap.ZONE_BIOMES.dungeon;
+
+  activeMap.tiles.forEach(tile => {
+    const px = tile.x * ts, py = tile.y * ts;
+    const isRevealed = VGMap.isTileRevealed(activeMap, tile.x, tile.y);
+    const isVisible = VGMap.isTileVisible(activeMap, tile.x, tile.y);
+
+    // Only render revealed tiles — completely hide unrevealed
+    if (!isRevealed) {
+      ctx.fillStyle = '#000000';
+      ctx.fillRect(px, py, ts, ts);
+      return;
+    }
+
+    // Zone or tile color
+    let fillColor = VGMap.TILE_TYPES[tile.type]?.color || '#1a1520';
+    if (tile.zoneId && tile.type !== 'wall') {
+      const zone = VGMap.getZone(activeMap, tile.zoneId);
+      if (zone) fillColor = zone.color + '88';
+    }
+    ctx.fillStyle = fillColor;
+    ctx.fillRect(px, py, ts, ts);
+
+    // Tile decorations
+    if (tile.type === 'door') {
+      ctx.fillStyle = '#5a3a10'; ctx.fillRect(px+ts*0.2, py+ts*0.1, ts*0.6, ts*0.8);
+      ctx.fillStyle = '#8a6020'; ctx.fillRect(px+ts*0.35, py+ts*0.45, ts*0.1, ts*0.1);
+    }
+    if (tile.type === 'water') { ctx.fillStyle='rgba(30,80,140,0.5)'; ctx.fillRect(px,py,ts,ts); }
+    if (tile.type === 'stairs') { ctx.fillStyle='rgba(100,80,180,0.4)'; ctx.fillRect(px+2,py+2,ts-4,ts-4); }
+
+    // Events — only show NON-hidden ones on revealed tiles
+    const event = VGMap.getEventAt(activeMap, tile.x, tile.y);
+    if (event && isRevealed) {
+      const showEvent = !event.hidden || event.triggered; // hidden events only appear after trigger
+      if (showEvent) {
+        const etype = VGMap.EVENT_TYPES[event.type] || {};
+        const cx = px + ts/2, cy = py + ts/2, r = ts * 0.32;
+        ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI*2);
+        ctx.fillStyle = (etype.color||'#888') + (event.triggered?'33':'77');
+        ctx.fill();
+        ctx.strokeStyle = (etype.color||'#888') + (event.triggered?'66':'bb');
+        ctx.lineWidth = 1.5; ctx.stroke();
+        if (ts >= 28) {
+          ctx.font = `${Math.round(ts*0.36)}px serif`;
+          ctx.textAlign='center'; ctx.textBaseline='middle';
+          ctx.fillStyle = event.triggered ? 'rgba(255,255,255,0.25)' : 'rgba(255,255,255,0.88)';
+          ctx.fillText(etype.icon||'?', cx, cy);
+        }
+      }
+    }
+
+    // Party token
+    if (tile.x === activeMap.partyPos.x && tile.y === activeMap.partyPos.y) {
+      const cx = px+ts/2, cy = py+ts/2;
+      // Glow
+      const grad = ctx.createRadialGradient(cx,cy,0,cx,cy,ts*0.7);
+      grad.addColorStop(0,'rgba(153,102,204,0.7)'); grad.addColorStop(1,'rgba(153,102,204,0)');
+      ctx.fillStyle=grad; ctx.fillRect(px-ts*0.3,py-ts*0.3,ts*1.6,ts*1.6);
+      // Token
+      ctx.beginPath(); ctx.arc(cx,cy,ts*0.3,0,Math.PI*2);
+      ctx.fillStyle='#8844cc'; ctx.fill();
+      ctx.strokeStyle='#ddaaff'; ctx.lineWidth=2; ctx.stroke();
+      if (ts >= 24) {
+        ctx.font=`${Math.round(ts*0.3)}px serif`;
+        ctx.textAlign='center'; ctx.textBaseline='middle';
+        ctx.fillStyle='white'; ctx.fillText('🧑',cx,cy);
+      }
+    }
+
+    // Dim visited-but-not-currently-visible tiles
+    if (!isVisible) {
+      ctx.fillStyle='rgba(0,0,0,0.6)';
+      ctx.fillRect(px,py,ts,ts);
+    }
+
+    // Grid lines on visible tiles
+    if (isVisible) {
+      ctx.strokeStyle='rgba(255,255,255,0.04)';
+      ctx.lineWidth=0.5; ctx.strokeRect(px+0.5,py+0.5,ts-1,ts-1);
+    }
+  });
+
+  // Sight radius ring
+  if (activeMap.partyPos) {
+    const cx = activeMap.partyPos.x*ts+ts/2, cy = activeMap.partyPos.y*ts+ts/2;
+    ctx.beginPath(); ctx.arc(cx,cy,activeMap.sightRadius*ts,0,Math.PI*2);
+    ctx.strokeStyle='rgba(153,102,204,0.2)'; ctx.lineWidth=1.5;
+    ctx.setLineDash([3,5]); ctx.stroke(); ctx.setLineDash([]);
+  }
+
+  updateStatus();
+  centerOnParty();
+}
+
+function centerOnParty() {
+  if (!activeMap) return;
+  const wrap = document.getElementById('mapWrap');
+  const ts = Math.round(TILE_SIZE * zoom);
+  const px = activeMap.partyPos.x * ts + ts/2;
+  const py = activeMap.partyPos.y * ts + ts/2;
+  const scrollX = px - wrap.clientWidth/2;
+  const scrollY = py - wrap.clientHeight/2;
+  // Smooth centering via scrollLeft/Top
+  wrap.scrollLeft = Math.max(0, scrollX);
+  wrap.scrollTop = Math.max(0, scrollY);
+}
+
+function updateStatus() {
+  if (!activeMap) return;
+  const p = activeMap.partyPos;
+  document.getElementById('partyPos').textContent = `${p.x}, ${p.y}`;
+  document.getElementById('revealCount').textContent = activeMap.revealedTiles.length;
+  document.getElementById('mapTitle').textContent = activeMap.name;
+
+  const tile = VGMap.getTile(activeMap, p.x, p.y);
+  const zone = tile?.zoneId ? VGMap.getZone(activeMap, tile.zoneId) : null;
+  document.getElementById('currentZone').textContent = zone?.name || '—';
+  if (zone) {
+    document.getElementById('infoTitle').textContent = zone.name;
+    document.getElementById('infoBody').textContent = zone.description || 'You enter this area...';
+  }
+
+  // NPC label from session
+  const campaign = window.VGEngine ? VGEngine.getState().campaign : null;
+  if (campaign?.npc) {
+    document.getElementById('npcLabel').textContent = `Playing as: ${campaign.npc.name} — ${campaign.npc.role || ''}`;
+  }
+}
+
+// ── Movement (player requests, DM can override) ─────────────
+function requestMove(dx, dy) {
+  if (!activeMap) return;
+  const nx = activeMap.partyPos.x + dx;
+  const ny = activeMap.partyPos.y + dy;
+
+  // Store pending move request
+  pendingMove = { nx, ny };
+  const moveStatus = document.getElementById('moveStatus');
+
+  if (VGMap.canMove(activeMap, nx, ny)) {
+    // Execute immediately — DM will see it on refresh
+    const result = VGMap.moveParty(activeMap, nx, ny);
+    activeMap = result.map;
+    VGMap.saveMap(activeMap);
+    if (result.event) triggerEventBanner(result.event);
+    render();
+    moveStatus.textContent = `Moved to ${nx},${ny}`;
+    setTimeout(() => moveStatus.textContent = '', 2000);
+  } else {
+    moveStatus.textContent = `Blocked — DM must override`;
+    setTimeout(() => moveStatus.textContent = '', 2000);
+    // Flash red on canvas
+    ctx.fillStyle='rgba(200,50,30,0.15)';
+    ctx.fillRect(0,0,canvas.width,canvas.height);
+    setTimeout(render, 150);
+  }
+}
+
+// ── Event Banner ───────────────────────────────────────────
+function triggerEventBanner(event) {
+  const etype = VGMap.EVENT_TYPES[event.type] || {};
+  const banner = document.getElementById('eventBanner');
+
+  // Update info panel
+  document.getElementById('infoTitle').textContent = `${etype.icon} ${event.label || etype.label}`;
+  document.getElementById('infoBody').textContent = event.description || etype.desc || '';
+
+  banner.innerHTML = `
+    <div class="event-banner">
+      <div class="event-banner-type" style="color:${etype.color||'#888'};">${etype.icon} ${etype.label} Triggered</div>
+      <div class="event-banner-title">${event.label || etype.label}</div>
+      ${event.description ? `<div class="event-banner-desc">${event.description}</div>` : ''}
+      ${event.loot ? `<div style="font-size:14px;color:#22aa44;margin-bottom:10px;">🎁 ${event.loot}</div>` : ''}
+      ${event.dc ? `<div style="font-size:14px;color:#aaaaff;margin-bottom:10px;">🎲 DC ${event.dc} check required</div>` : ''}
+      <button class="btn btn-ghost" style="font-size:10px;" onclick="document.getElementById('eventBanner').style.display='none'">Dismiss</button>
+    </div>`;
+  banner.style.display='block';
+  setTimeout(() => { banner.style.display='none'; }, 10000);
+}
+
+// ── Zoom / Fit ─────────────────────────────────────────────
+function setZoom(z) {
+  zoom=z;
+  document.getElementById('zoomVal').textContent=z.toFixed(1)+'×';
+  if (activeMap) render();
+}
+function fitToView() {
+  if (!activeMap) return;
+  const wrap = document.getElementById('mapWrap');
+  const zw = wrap.clientWidth/(activeMap.cols*TILE_SIZE);
+  const zh = wrap.clientHeight/(activeMap.rows*TILE_SIZE);
+  zoom = Math.min(zw,zh,2.5);
+  zoom = Math.round(zoom*10)/10;
+  document.getElementById('zoomSlider').value=zoom;
+  document.getElementById('zoomVal').textContent=zoom.toFixed(1)+'×';
+  render();
+}
+
+// ── Input ──────────────────────────────────────────────────
+function setupInput() {
+  document.addEventListener('keydown', e => {
+    const dirs = { ArrowUp:[0,-1], ArrowDown:[0,1], ArrowLeft:[-1,0], ArrowRight:[1,0] };
+    if (dirs[e.key]) { e.preventDefault(); requestMove(...dirs[e.key]); }
+  });
+}
+
+function showNoMap() {
+  document.getElementById('mapWrap').innerHTML = `
+    <div style="text-align:center;padding:60px;color:var(--text-dim);">
+      <div style="font-family:'Cinzel',serif;font-size:20px;color:var(--purple);margin-bottom:12px;">No Map Active</div>
+      <p style="font-style:italic;">The DM has not loaded a map yet.<br>This view auto-refreshes.</p>
+    </div>`;
+}
+
+init();
+</script>
+</body>
+</html>

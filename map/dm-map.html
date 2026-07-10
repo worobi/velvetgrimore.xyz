@@ -1,0 +1,1148 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Velvet Grimoire — Map Editor (DM)</title>
+<link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@400;600&family=Crimson+Pro:ital,wght@0,400;0,600;1,400&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg:#070509;--surface:#100d14;--surface2:#16121e;
+  --border:rgba(150,100,200,0.15);--border-hot:rgba(180,140,220,0.4);
+  --gold:#c8a060;--gold-dim:#7a5a28;
+  --red:#cc3322;--blue:#2266bb;--green:#22aa44;--purple:#8844cc;
+  --text:#e0d0f0;--text-dim:#907888;--text-muted:#3a2840;
+  --fight:#cc3322;--flight:#2266bb;--freeze:#aa8800;
+  --tile:40px;
+}
+*{box-sizing:border-box;margin:0;padding:0;}
+body{background:var(--bg);color:var(--text);font-family:'Crimson Pro',serif;font-size:15px;display:flex;height:100vh;overflow:hidden;}
+
+/* Layout */
+.sidebar-left{width:220px;background:var(--surface);border-right:1px solid var(--border);display:flex;flex-direction:column;overflow-y:auto;flex-shrink:0;}
+.map-area{flex:1;display:flex;flex-direction:column;overflow:hidden;}
+.sidebar-right{width:280px;background:var(--surface);border-left:1px solid var(--border);display:flex;flex-direction:column;overflow-y:auto;flex-shrink:0;}
+
+/* Sidebar sections */
+.sb-logo{padding:16px;border-bottom:1px solid var(--border);}
+.sb-logo h1{font-family:'Cinzel',serif;font-size:12px;letter-spacing:3px;color:var(--gold);}
+.sb-logo p{font-size:10px;color:var(--text-muted);margin-top:2px;}
+.sb-section{padding:12px;border-bottom:1px solid var(--border);}
+.sb-label{font-size:9px;letter-spacing:3px;text-transform:uppercase;color:var(--text-muted);margin-bottom:8px;}
+.sb-btn{display:flex;align-items:center;gap:6px;padding:8px 10px;border:1px solid var(--border);border-radius:3px;background:transparent;color:var(--text-dim);font-family:'Crimson Pro',serif;font-size:13px;cursor:pointer;width:100%;margin-bottom:4px;transition:all .15s;}
+.sb-btn:hover{border-color:var(--border-hot);color:var(--text);}
+.sb-btn.active{background:rgba(136,68,204,0.2);border-color:rgba(136,68,204,0.5);color:#cc99ff;}
+.sb-btn.tool-active{background:rgba(200,160,96,0.15);border-color:var(--gold-dim);color:var(--gold);}
+
+/* Tool palette */
+.tool-grid{display:grid;grid-template-columns:1fr 1fr;gap:4px;}
+.tool-btn{padding:8px 6px;border:1px solid var(--border);border-radius:3px;background:var(--surface2);color:var(--text-dim);font-size:11px;cursor:pointer;text-align:center;transition:all .15s;font-family:'Crimson Pro',serif;}
+.tool-btn:hover,.tool-btn.active{border-color:var(--gold-dim);color:var(--gold);background:rgba(200,160,96,0.1);}
+
+/* Tile type palette */
+.tile-palette{display:grid;grid-template-columns:1fr 1fr;gap:3px;}
+.tile-swatch{padding:6px 8px;border-radius:3px;cursor:pointer;border:1px solid transparent;font-size:11px;transition:all .15s;}
+.tile-swatch:hover,.tile-swatch.active{border-color:var(--gold-dim);}
+
+/* Event palette */
+.event-palette{display:flex;flex-direction:column;gap:3px;}
+.event-btn{padding:7px 10px;border:1px solid var(--border);border-radius:3px;background:transparent;color:var(--text-dim);font-size:12px;cursor:pointer;text-align:left;transition:all .15s;font-family:'Crimson Pro',serif;}
+.event-btn:hover,.event-btn.active{background:rgba(255,255,255,0.04);border-color:var(--border-hot);}
+
+/* Top toolbar */
+.toolbar{background:var(--surface);border-bottom:1px solid var(--border);padding:8px 16px;display:flex;align-items:center;gap:8px;flex-shrink:0;}
+.toolbar select,.toolbar input{background:var(--surface2);border:1px solid var(--border);color:var(--text);padding:5px 8px;border-radius:3px;font-family:'Crimson Pro',serif;font-size:13px;}
+.toolbar select option{background:var(--surface);}
+.t-divider{width:1px;height:24px;background:var(--border);margin:0 4px;}
+
+/* Canvas area */
+.canvas-wrap{flex:1;overflow:auto;position:relative;background:var(--bg);}
+#mapCanvas{cursor:crosshair;display:block;image-rendering:pixelated;}
+.canvas-wrap.pan{cursor:grab;}
+.canvas-wrap.pan:active{cursor:grabbing;}
+
+/* Bottom status */
+.statusbar{background:var(--surface);border-top:1px solid var(--border);padding:6px 16px;display:flex;gap:16px;font-size:12px;color:var(--text-muted);flex-shrink:0;}
+.statusbar span{color:var(--text-dim);}
+
+/* Right panel */
+.info-panel{padding:16px;}
+.info-title{font-family:'Cinzel',serif;font-size:13px;color:var(--gold);margin-bottom:12px;}
+.info-row{font-size:13px;margin-bottom:6px;color:var(--text-dim);}
+.info-row strong{color:var(--text);}
+
+/* Forms */
+label{display:block;font-size:9px;letter-spacing:2px;text-transform:uppercase;color:var(--text-muted);margin:10px 0 4px;}
+input[type=text],input[type=number],textarea,select{width:100%;background:rgba(255,255,255,0.03);border:1px solid var(--border);border-radius:3px;padding:7px 9px;color:var(--text);font-family:'Crimson Pro',serif;font-size:14px;outline:none;transition:border .15s;}
+input[type=text]:focus,input[type=number]:focus,textarea:focus,select:focus{border-color:var(--border-hot);}
+textarea{resize:vertical;min-height:60px;line-height:1.6;}
+input[type=checkbox]{accent-color:var(--gold);width:14px;height:14px;}
+
+.btn{display:inline-flex;align-items:center;gap:6px;padding:8px 14px;border-radius:3px;cursor:pointer;font-family:'Cinzel',serif;font-size:10px;letter-spacing:2px;text-transform:uppercase;border:1px solid;transition:all .15s;}
+.btn-gold{background:rgba(200,160,96,0.15);border-color:var(--gold-dim);color:var(--gold);}
+.btn-gold:hover{background:rgba(200,160,96,0.25);}
+.btn-red{background:rgba(200,50,30,0.15);border-color:rgba(200,50,30,0.4);color:#ff8060;}
+.btn-ghost{background:transparent;border-color:var(--border);color:var(--text-dim);}
+.btn-ghost:hover{border-color:var(--border-hot);color:var(--text);}
+.btn-sm{padding:5px 10px;font-size:9px;}
+.btn-green{background:rgba(34,170,68,0.15);border-color:rgba(34,170,68,0.4);color:#88ff88;}
+.btn-blue{background:rgba(34,102,187,0.15);border-color:rgba(34,102,187,0.4);color:#88aaff;}
+
+/* Zone list */
+.zone-item{padding:8px 10px;border:1px solid var(--border);border-radius:3px;margin-bottom:4px;cursor:pointer;font-size:12px;transition:all .15s;}
+.zone-item:hover{border-color:var(--border-hot);}
+.zone-item.active{border-color:rgba(136,68,204,0.5);background:rgba(136,68,204,0.1);}
+
+/* Event list */
+.event-item{padding:8px 10px;border:1px solid var(--border);border-radius:3px;margin-bottom:4px;font-size:12px;cursor:pointer;transition:all .15s;display:flex;align-items:center;gap:8px;}
+.event-item:hover{border-color:var(--border-hot);}
+
+/* Modal */
+.modal-overlay{display:none;position:fixed;inset:0;z-index:100;background:rgba(0,0,0,0.88);align-items:center;justify-content:center;}
+.modal-overlay.open{display:flex;}
+.modal{background:var(--surface);border:1px solid var(--border-hot);border-radius:6px;width:90%;max-width:480px;max-height:88vh;overflow-y:auto;padding:24px;box-shadow:0 20px 80px rgba(0,0,0,0.9);}
+.modal-title{font-family:'Cinzel',serif;font-size:15px;color:var(--gold);margin-bottom:16px;padding-bottom:12px;border-bottom:1px solid var(--border);}
+
+/* Toast */
+.toast{position:fixed;bottom:20px;right:20px;z-index:9999;background:var(--surface);border:1px solid var(--border-hot);border-radius:4px;padding:10px 16px;font-size:13px;opacity:0;transform:translateY(8px);transition:all .3s;pointer-events:none;}
+.toast.show{opacity:1;transform:translateY(0);}
+.toast.ok{border-color:rgba(34,170,68,0.5);color:#88ff88;}
+.toast.err{border-color:rgba(200,50,30,0.5);color:#ff8060;}
+
+/* Event trigger popup */
+.event-popup{position:fixed;z-index:200;background:var(--surface);border:1px solid var(--border-hot);border-radius:6px;padding:20px;width:320px;box-shadow:0 12px 50px rgba(0,0,0,0.9);animation:popIn .25s ease;}
+@keyframes popIn{from{opacity:0;transform:scale(0.9)}to{opacity:1;transform:scale(1)}}
+
+::-webkit-scrollbar{width:5px;}
+::-webkit-scrollbar-track{background:transparent;}
+::-webkit-scrollbar-thumb{background:var(--text-muted);border-radius:3px;}
+
+.flex{display:flex;}.gap-6{gap:6px;}.gap-8{gap:8px;}.mt-8{margin-top:8px;}.mt-12{margin-top:12px;}.mt-16{margin-top:16px;}
+.flex-between{justify-content:space-between;}.align-center{align-items:center;}
+.grid-2{display:grid;grid-template-columns:1fr 1fr;gap:8px;}
+</style>
+</head>
+<body>
+
+<!-- LEFT SIDEBAR: Tools -->
+<aside class="sidebar-left">
+  <div class="sb-logo">
+    <h1>Map Editor</h1>
+    <p>DM Full Control</p>
+  </div>
+
+  <div class="sb-section">
+    <div class="sb-label">Active Map</div>
+    <select id="mapSelect" onchange="loadSelectedMap()" style="width:100%;margin-bottom:6px;"></select>
+    <button class="sb-btn" onclick="openNewMapModal()">+ New Map</button>
+    <button class="sb-btn" onclick="openPresetModal()">⚡ Load Preset</button>
+  </div>
+
+  <div class="sb-section">
+    <div class="sb-label">Tool Mode</div>
+    <div class="tool-grid">
+      <button class="tool-btn active" id="tool-select" onclick="setTool('select')">🖱 Select</button>
+      <button class="tool-btn" id="tool-paint" onclick="setTool('paint')">🖌 Paint</button>
+      <button class="tool-btn" id="tool-erase" onclick="setTool('erase')">⬜ Erase</button>
+      <button class="tool-btn" id="tool-zone" onclick="setTool('zone')">🗺 Zone</button>
+      <button class="tool-btn" id="tool-event" onclick="setTool('event')">⚡ Event</button>
+      <button class="tool-btn" id="tool-move" onclick="setTool('move')">👣 Move</button>
+    </div>
+  </div>
+
+  <div class="sb-section" id="paintPalette">
+    <div class="sb-label">Tile Type</div>
+    <div class="tile-palette" id="tilePalette"></div>
+  </div>
+
+  <div class="sb-section" id="eventPalette" style="display:none;">
+    <div class="sb-label">Event Type</div>
+    <div class="event-palette" id="eventTypePalette"></div>
+  </div>
+
+  <div class="sb-section">
+    <div class="sb-label">View</div>
+    <button class="sb-btn" onclick="toggleFog()">🌫 Toggle Fog</button>
+    <button class="sb-btn" onclick="revealAll()">👁 Reveal All</button>
+    <button class="sb-btn" onclick="resetFog()">🔲 Reset Fog</button>
+    <button class="sb-btn" onclick="fitToView()">⊙ Fit View</button>
+  </div>
+
+  <div class="sb-section" style="margin-top:auto;">
+    <button class="sb-btn" onclick="saveCurrentMap()">💾 Save Map</button>
+    <button class="sb-btn" onclick="VGMap.exportMap(activeMapId)">⬇ Export JSON</button>
+    <a href="https://vg.highfunctioningchaos.living/admin/" class="sb-btn" style="text-decoration:none;">← Admin Panel</a>
+    <a href="https://vg.highfunctioningchaos.living/" class="sb-btn" style="text-decoration:none;">⌂ Home</a>
+  </div>
+</aside>
+
+<!-- CENTER: Map Canvas -->
+<div class="map-area">
+  <div class="toolbar">
+    <span style="font-family:'Cinzel',serif;font-size:11px;color:var(--gold-dim);letter-spacing:2px;">MAP:</span>
+    <span id="mapNameLabel" style="font-size:13px;color:var(--text);">No map loaded</span>
+    <div class="t-divider"></div>
+    <label style="margin:0;font-size:11px;color:var(--text-muted);">Zoom:</label>
+    <input type="range" min="0.4" max="2.5" step="0.1" value="1" id="zoomSlider" oninput="setZoom(+this.value)" style="width:80px;accent-color:var(--gold);">
+    <span id="zoomLabel" style="font-size:11px;color:var(--text-dim);width:32px;">1×</span>
+    <div class="t-divider"></div>
+    <button class="btn btn-ghost btn-sm" onclick="openRandomSeedModal()">🎲 Random Events</button>
+    <button class="btn btn-ghost btn-sm" onclick="openZoneModal()">+ Zone</button>
+    <div class="t-divider"></div>
+    <label style="margin:0;display:flex;align-items:center;gap:6px;font-size:12px;color:var(--text-dim);cursor:pointer;">
+      <input type="checkbox" id="gridToggle" checked onchange="redraw()"> Grid
+    </label>
+    <label style="margin:0;display:flex;align-items:center;gap:6px;font-size:12px;color:var(--text-dim);cursor:pointer;">
+      <input type="checkbox" id="labelsToggle" checked onchange="redraw()"> Labels
+    </label>
+    <div style="margin-left:auto;display:flex;gap:6px;">
+      <button class="btn btn-green btn-sm" onclick="openPlayerMap()">🎮 Open Player Map</button>
+    </div>
+  </div>
+
+  <div class="canvas-wrap" id="canvasWrap">
+    <canvas id="mapCanvas"></canvas>
+  </div>
+
+  <div class="statusbar">
+    <span>Pos: <span id="statusPos">—</span></span>
+    <span>Party: <span id="statusParty">—</span></span>
+    <span>Tool: <span id="statusTool">select</span></span>
+    <span>Tile: <span id="statusTile">—</span></span>
+    <span>Zone: <span id="statusZone">—</span></span>
+    <span>Event: <span id="statusEvent">—</span></span>
+  </div>
+</div>
+
+<!-- RIGHT SIDEBAR: Inspector -->
+<aside class="sidebar-right">
+  <div class="sb-section">
+    <div class="sb-label">Inspector</div>
+    <div id="inspector" class="info-panel" style="padding:0;">
+      <div style="color:var(--text-muted);font-style:italic;font-size:13px;padding:8px 0;">Click a tile to inspect.</div>
+    </div>
+  </div>
+
+  <div class="sb-section">
+    <div class="sb-label">Party Control</div>
+    <div style="padding:4px 0;">
+      <div style="font-size:12px;color:var(--text-dim);margin-bottom:8px;">Party at: <strong id="partyPosDisplay" style="color:var(--gold);">—</strong></div>
+      <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:4px;max-width:120px;">
+        <div></div>
+        <button class="btn btn-ghost btn-sm" onclick="moveParty(0,-1)" title="North">↑</button>
+        <div></div>
+        <button class="btn btn-ghost btn-sm" onclick="moveParty(-1,0)" title="West">←</button>
+        <div style="width:32px;height:32px;border:1px solid var(--border);border-radius:3px;display:flex;align-items:center;justify-content:center;font-size:16px;">🧑</div>
+        <button class="btn btn-ghost btn-sm" onclick="moveParty(1,0)" title="East">→</button>
+        <div></div>
+        <button class="btn btn-ghost btn-sm" onclick="moveParty(0,1)" title="South">↓</button>
+        <div></div>
+      </div>
+      <div style="margin-top:8px;display:flex;gap:4px;">
+        <button class="btn btn-red btn-sm" onclick="teleportParty()">⚡ Teleport</button>
+        <button class="btn btn-ghost btn-sm" onclick="resetPartyStart()">⌂ Start</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="sb-section">
+    <div class="sb-label">Zones <button class="btn btn-ghost btn-sm" style="float:right;margin-top:-4px;" onclick="openZoneModal()">+</button></div>
+    <div id="zoneList" style="margin-top:4px;"></div>
+  </div>
+
+  <div class="sb-section">
+    <div class="sb-label">Events <span id="eventCount" style="color:var(--text-muted);">(0)</span></div>
+    <div id="eventList" style="margin-top:4px;max-height:200px;overflow-y:auto;"></div>
+  </div>
+
+  <div class="sb-section">
+    <div class="sb-label">Session</div>
+    <select id="sessionCampaignSelect" style="width:100%;margin-bottom:6px;"></select>
+    <button class="btn btn-gold btn-sm" onclick="linkMapToCampaign()" style="width:100%;justify-content:center;">🔗 Link to Campaign</button>
+  </div>
+</aside>
+
+<!-- MODALS -->
+<div class="modal-overlay" id="modal-newmap">
+  <div class="modal">
+    <div class="modal-title">Create New Map</div>
+    <label>Map Name</label><input type="text" id="newMapName" placeholder="The Crimson Depths">
+    <label>Biome / Setting</label>
+    <select id="newMapBiome">
+      <option value="dungeon">Dungeon</option><option value="tavern">Tavern</option>
+      <option value="forest">Forest</option><option value="court">Royal Court</option>
+      <option value="ship">Ship</option><option value="city">City</option><option value="ruins">Ruins</option>
+    </select>
+    <div class="grid-2">
+      <div><label>Width (cols)</label><input type="number" id="newMapCols" value="20" min="8" max="60"></div>
+      <div><label>Height (rows)</label><input type="number" id="newMapRows" value="15" min="8" max="40"></div>
+    </div>
+    <label>Sight Radius</label><input type="number" id="newMapSight" value="4" min="1" max="12">
+    <div class="flex gap-8 mt-16" style="justify-content:flex-end;">
+      <button class="btn btn-ghost" onclick="closeModal('modal-newmap')">Cancel</button>
+      <button class="btn btn-gold" onclick="createNewMap()">✦ Create</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-overlay" id="modal-preset">
+  <div class="modal">
+    <div class="modal-title">Load Preset Map</div>
+    <p style="font-size:14px;color:var(--text-dim);margin-bottom:16px;">Fully pre-built maps with zones and events ready to play.</p>
+    <div style="display:flex;flex-direction:column;gap:8px;">
+      <button class="btn btn-ghost" onclick="loadPreset('tavern')" style="justify-content:flex-start;font-size:13px;padding:12px 16px;">🍺 The Rusty Flagon — Tavern (24×18)</button>
+      <button class="btn btn-ghost" onclick="loadPreset('dungeon')" style="justify-content:flex-start;font-size:13px;padding:12px 16px;">⛓ The Crimson Depths — Dungeon (28×22)</button>
+      <button class="btn btn-ghost" onclick="loadPreset('city')" style="justify-content:flex-start;font-size:13px;padding:12px 16px;">🏙 City of Veils — City District (30×24)</button>
+    </div>
+    <div class="flex gap-8 mt-16" style="justify-content:flex-end;">
+      <button class="btn btn-ghost" onclick="closeModal('modal-preset')">Cancel</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-overlay" id="modal-event">
+  <div class="modal">
+    <div class="modal-title" id="eventModalTitle">Place Event</div>
+    <input type="hidden" id="eventTileX"><input type="hidden" id="eventTileY">
+    <input type="hidden" id="editEventId">
+    <label>Event Type</label>
+    <select id="eventType" onchange="updateEventTypeUI()">
+      <option value="scene">🎭 Scene</option><option value="combat">⚔️ Combat</option>
+      <option value="loot">🎁 Loot</option><option value="trap">💀 Trap</option>
+      <option value="locked">🔒 Locked</option><option value="rest">🏕️ Safe Room</option>
+      <option value="npc">🧑 NPC</option><option value="custom">✦ Custom</option>
+    </select>
+    <label>Label</label><input type="text" id="eventLabel" placeholder="Event name...">
+    <label>Description / Notes</label><textarea id="eventDesc" rows="3" placeholder="What happens here..."></textarea>
+    <div id="eventSceneRow">
+      <label>Link to Scene</label>
+      <select id="eventSceneId"><option value="">— No scene linked —</option></select>
+    </div>
+    <div id="eventDCRow">
+      <label>DC Roll Required</label><input type="number" id="eventDC" value="12" min="1" max="30">
+    </div>
+    <div id="eventLootRow">
+      <label>Loot / Reward</label><input type="text" id="eventLoot" placeholder="e.g. Iron Key, 50gp, Enchanted Dagger">
+    </div>
+    <div style="display:flex;gap:16px;margin-top:12px;">
+      <label style="display:flex;align-items:center;gap:6px;margin:0;text-transform:none;letter-spacing:0;font-size:13px;cursor:pointer;">
+        <input type="checkbox" id="eventHidden"> Hidden (trap/secret)
+      </label>
+      <label style="display:flex;align-items:center;gap:6px;margin:0;text-transform:none;letter-spacing:0;font-size:13px;cursor:pointer;">
+        <input type="checkbox" id="eventRepeatable"> Repeatable
+      </label>
+    </div>
+    <div class="flex gap-8 mt-16" style="justify-content:flex-end;">
+      <button class="btn btn-ghost" onclick="closeModal('modal-event')">Cancel</button>
+      <button class="btn btn-red btn-sm" id="removeEventBtn" onclick="removeCurrentEvent()" style="display:none;">🗑 Remove</button>
+      <button class="btn btn-gold" onclick="saveEventForm()">✦ Save Event</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-overlay" id="modal-zone">
+  <div class="modal">
+    <div class="modal-title">Add Zone</div>
+    <p style="font-size:13px;color:var(--text-dim);margin-bottom:12px;">Define a zone by painting it on the map using the Zone tool, or enter a rectangle here.</p>
+    <label>Zone Name</label><input type="text" id="zoneName" placeholder="Main Chamber">
+    <label>Description</label><textarea id="zoneDesc" rows="2" placeholder="What defines this area..."></textarea>
+    <label>Biome</label>
+    <select id="zoneBiome">
+      <option value="dungeon">Dungeon</option><option value="tavern">Tavern</option>
+      <option value="forest">Forest</option><option value="court">Royal Court</option>
+      <option value="ship">Ship</option><option value="city">City</option><option value="ruins">Ruins</option>
+    </select>
+    <label>Zone Color</label><input type="color" id="zoneColor" value="#2a1a3a" style="width:60px;padding:2px;height:32px;">
+    <div class="grid-2">
+      <div><label>X1</label><input type="number" id="zx1" value="1" min="0"></div>
+      <div><label>Y1</label><input type="number" id="zy1" value="1" min="0"></div>
+      <div><label>X2</label><input type="number" id="zx2" value="5" min="0"></div>
+      <div><label>Y2</label><input type="number" id="zy2" value="5" min="0"></div>
+    </div>
+    <div class="flex gap-8 mt-16" style="justify-content:flex-end;">
+      <button class="btn btn-ghost" onclick="closeModal('modal-zone')">Cancel</button>
+      <button class="btn btn-gold" onclick="saveZoneForm()">✦ Add Zone</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-overlay" id="modal-seed">
+  <div class="modal">
+    <div class="modal-title">🎲 Seed Random Events</div>
+    <label>Event Density</label>
+    <input type="range" min="0.05" max="0.4" step="0.05" value="0.15" id="seedDensity" oninput="document.getElementById('seedDensityVal').textContent=Math.round(+this.value*100)+'%'">
+    <span id="seedDensityVal" style="color:var(--gold);font-family:'Cinzel',serif;">15%</span>
+    <label style="margin-top:12px;">Event Types to Include</label>
+    <div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:4px;" id="seedTypeChecks"></div>
+    <label style="margin-top:12px;">Preserve manually placed events</label>
+    <label style="display:flex;align-items:center;gap:8px;margin:4px 0;text-transform:none;letter-spacing:0;font-size:14px;cursor:pointer;">
+      <input type="checkbox" id="seedPreserve" checked> Yes, keep existing events
+    </label>
+    <div class="flex gap-8 mt-16" style="justify-content:flex-end;">
+      <button class="btn btn-ghost" onclick="closeModal('modal-seed')">Cancel</button>
+      <button class="btn btn-gold" onclick="runSeedEvents()">✦ Seed Events</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-overlay" id="modal-teleport">
+  <div class="modal">
+    <div class="modal-title">⚡ Teleport Party</div>
+    <div class="grid-2">
+      <div><label>X</label><input type="number" id="teleX" value="1" min="0"></div>
+      <div><label>Y</label><input type="number" id="teleY" value="1" min="0"></div>
+    </div>
+    <label style="display:flex;align-items:center;gap:8px;margin-top:12px;text-transform:none;letter-spacing:0;font-size:14px;cursor:pointer;">
+      <input type="checkbox" id="teleIgnoreWalls" checked> Override walls (DM teleport)
+    </label>
+    <div class="flex gap-8 mt-16" style="justify-content:flex-end;">
+      <button class="btn btn-ghost" onclick="closeModal('modal-teleport')">Cancel</button>
+      <button class="btn btn-gold" onclick="doTeleport()">⚡ Teleport</button>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script src="../engine/engine.js"></script>
+<script src="../engine/map-engine.js"></script>
+<script>
+
+// ── State ──────────────────────────────────────────────────
+let activeMapId = null;
+let activeMap = null;
+let activeTool = 'select';
+let activeTileType = 'floor';
+let activeEventType = 'scene';
+let activeZoneId = null;
+let zoom = 1;
+let showFog = true;
+let isPainting = false;
+let inspectedTile = null;
+let zoneDrawTiles = [];
+
+const TILE_SIZE = 40;
+const canvas = document.getElementById('mapCanvas');
+const ctx = canvas.getContext('2d');
+
+// ── Init ───────────────────────────────────────────────────
+window.onload = () => {
+  buildTilePalette();
+  buildEventTypePalette();
+  buildSeedTypeChecks();
+  loadMapList();
+  loadCampaignList();
+  setupCanvasEvents();
+};
+
+// ── Map List ───────────────────────────────────────────────
+function loadMapList() {
+  const maps = VGMap.getMaps();
+  const sel = document.getElementById('mapSelect');
+  sel.innerHTML = '<option value="">— Select Map —</option>' + maps.map(m => `<option value="${m.id}">${m.name}</option>`).join('');
+  if (maps.length) { sel.value = maps[0].id; loadSelectedMap(); }
+}
+
+function loadSelectedMap() {
+  const id = document.getElementById('mapSelect').value;
+  if (!id) return;
+  activeMapId = id;
+  activeMap = VGMap.getMap(id);
+  if (!activeMap) return;
+  document.getElementById('mapNameLabel').textContent = activeMap.name;
+  initCanvas();
+  redraw();
+  renderZoneList();
+  renderEventList();
+  updatePartyDisplay();
+}
+
+function initCanvas() {
+  const ts = Math.round(TILE_SIZE * zoom);
+  canvas.width = activeMap.cols * ts;
+  canvas.height = activeMap.rows * ts;
+}
+
+// ── Toolbar ─────────────────────────────────────────────────
+function setTool(tool) {
+  activeTool = tool;
+  document.querySelectorAll('.tool-btn').forEach(b => b.classList.remove('active'));
+  document.getElementById('tool-' + tool)?.classList.add('active');
+  document.getElementById('statusTool').textContent = tool;
+  document.getElementById('paintPalette').style.display = ['paint','erase'].includes(tool) ? '' : '';
+  document.getElementById('eventPalette').style.display = tool === 'event' ? '' : 'none';
+  canvas.style.cursor = tool === 'move' ? 'cell' : tool === 'paint' ? 'crosshair' : 'default';
+}
+
+function setZoom(z) {
+  zoom = z;
+  document.getElementById('zoomLabel').textContent = z.toFixed(1) + '×';
+  if (activeMap) { initCanvas(); redraw(); }
+}
+
+function fitToView() {
+  if (!activeMap) return;
+  const wrap = document.getElementById('canvasWrap');
+  const zw = wrap.clientWidth / (activeMap.cols * TILE_SIZE);
+  const zh = wrap.clientHeight / (activeMap.rows * TILE_SIZE);
+  const z = Math.min(zw, zh, 2.5);
+  zoom = Math.round(z * 10) / 10;
+  document.getElementById('zoomSlider').value = zoom;
+  document.getElementById('zoomLabel').textContent = zoom.toFixed(1) + '×';
+  initCanvas(); redraw();
+}
+
+// ── Canvas Events ──────────────────────────────────────────
+function setupCanvasEvents() {
+  canvas.addEventListener('mousemove', onMouseMove);
+  canvas.addEventListener('mousedown', onMouseDown);
+  canvas.addEventListener('mouseup', () => { isPainting = false; });
+  canvas.addEventListener('mouseleave', () => { isPainting = false; });
+  canvas.addEventListener('contextmenu', e => { e.preventDefault(); onRightClick(e); });
+  document.addEventListener('keydown', onKeyDown);
+}
+
+function getTileFromEvent(e) {
+  const rect = canvas.getBoundingClientRect();
+  const ts = TILE_SIZE * zoom;
+  const x = Math.floor((e.clientX - rect.left) / ts);
+  const y = Math.floor((e.clientY - rect.top) / ts);
+  return { x, y };
+}
+
+function onMouseMove(e) {
+  if (!activeMap) return;
+  const { x, y } = getTileFromEvent(e);
+  const tile = VGMap.getTile(activeMap, x, y);
+  document.getElementById('statusPos').textContent = `${x},${y}`;
+  if (tile) {
+    document.getElementById('statusTile').textContent = tile.type;
+    const zone = tile.zoneId ? VGMap.getZone(activeMap, tile.zoneId)?.name : '—';
+    document.getElementById('statusZone').textContent = zone || '—';
+    const ev = VGMap.getEventAt(activeMap, x, y);
+    document.getElementById('statusEvent').textContent = ev ? `${VGMap.EVENT_TYPES[ev.type]?.icon} ${ev.label}` : '—';
+  }
+  if (isPainting) applyTool(x, y);
+}
+
+function onMouseDown(e) {
+  if (!activeMap) return;
+  if (e.button !== 0) return;
+  isPainting = true;
+  const { x, y } = getTileFromEvent(e);
+  applyTool(x, y, true);
+}
+
+function onRightClick(e) {
+  if (!activeMap) return;
+  const { x, y } = getTileFromEvent(e);
+  inspectTile(x, y);
+}
+
+function onKeyDown(e) {
+  if (!activeMap) return;
+  const map = { ArrowUp:[0,-1], ArrowDown:[0,1], ArrowLeft:[-1,0], ArrowRight:[1,0] };
+  if (map[e.key]) { e.preventDefault(); moveParty(...map[e.key]); }
+  if (e.key === '1') setTool('select');
+  if (e.key === '2') setTool('paint');
+  if (e.key === '3') setTool('erase');
+  if (e.key === '4') setTool('zone');
+  if (e.key === '5') setTool('event');
+  if (e.key === '6') setTool('move');
+}
+
+function applyTool(x, y, click = false) {
+  if (!activeMap) return;
+  if (x < 0 || y < 0 || x >= activeMap.cols || y >= activeMap.rows) return;
+
+  if (activeTool === 'select' && click) { inspectTile(x, y); }
+  else if (activeTool === 'paint') {
+    VGMap.setTile(activeMap, x, y, { type: activeTileType });
+    redraw();
+  }
+  else if (activeTool === 'erase') {
+    VGMap.setTile(activeMap, x, y, { type: 'floor' });
+    const ev = VGMap.getEventAt(activeMap, x, y);
+    if (ev) VGMap.removeEvent(activeMap, ev.id);
+    redraw();
+  }
+  else if (activeTool === 'zone' && click) {
+    // Mark tile with active zone
+    if (activeZoneId) {
+      VGMap.setTile(activeMap, x, y, { zoneId: activeZoneId });
+      const zone = VGMap.getZone(activeMap, activeZoneId);
+      if (zone && !zone.tiles.find(t => t.x===x&&t.y===y)) zone.tiles.push({x,y});
+      redraw();
+    }
+  }
+  else if (activeTool === 'event' && click) { openEventModal(x, y); }
+  else if (activeTool === 'move' && click) {
+    const result = VGMap.moveParty(activeMap, x, y, true); // DM override
+    activeMap = result.map;
+    updatePartyDisplay();
+    if (result.event) showEventPopup(result.event, x, y);
+    redraw();
+    saveCurrentMap(true);
+  }
+}
+
+// ── Draw ───────────────────────────────────────────────────
+function redraw() {
+  if (!activeMap) return;
+  const ts = Math.round(TILE_SIZE * zoom);
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+  const showGrid = document.getElementById('gridToggle').checked;
+  const showLabels = document.getElementById('labelsToggle').checked;
+  const biome = VGMap.ZONE_BIOMES[activeMap.biome] || VGMap.ZONE_BIOMES.dungeon;
+
+  activeMap.tiles.forEach(tile => {
+    const px = tile.x * ts, py = tile.y * ts;
+    const isRevealed = VGMap.isTileRevealed(activeMap, tile.x, tile.y);
+    const isVisible = VGMap.isTileVisible(activeMap, tile.x, tile.y);
+
+    // Zone color or default
+    let fillColor = VGMap.TILE_TYPES[tile.type]?.color || '#1a1520';
+    if (tile.zoneId && tile.type !== 'wall') {
+      const zone = VGMap.getZone(activeMap, tile.zoneId);
+      if (zone) fillColor = zone.color + '99';
+    }
+
+    ctx.fillStyle = fillColor;
+    ctx.fillRect(px, py, ts, ts);
+
+    // Tile type decorations
+    if (tile.type === 'door') {
+      ctx.fillStyle = '#5a3a10';
+      ctx.fillRect(px + ts*0.2, py + ts*0.1, ts*0.6, ts*0.8);
+      ctx.fillStyle = '#8a6020';
+      ctx.fillRect(px + ts*0.35, py + ts*0.45, ts*0.1, ts*0.1);
+    }
+    if (tile.type === 'water') {
+      ctx.fillStyle = 'rgba(30,80,140,0.5)';
+      ctx.fillRect(px, py, ts, ts);
+    }
+    if (tile.type === 'stairs') {
+      ctx.fillStyle = 'rgba(100,80,180,0.4)';
+      ctx.fillRect(px+2, py+2, ts-4, ts-4);
+    }
+
+    // Event marker
+    const event = VGMap.getEventAt(activeMap, tile.x, tile.y);
+    if (event) {
+      const isDMVisible = true; // DM always sees all events
+      const etype = VGMap.EVENT_TYPES[event.type] || {};
+      // Pulsing circle
+      const cx2 = px + ts/2, cy2 = py + ts/2, r = ts * 0.35;
+      ctx.beginPath();
+      ctx.arc(cx2, cy2, r, 0, Math.PI*2);
+      ctx.fillStyle = (etype.color || '#888') + (event.triggered ? '44' : '88');
+      ctx.fill();
+      ctx.strokeStyle = (etype.color || '#888') + 'cc';
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+      // Icon
+      if (showLabels) {
+        ctx.font = `${Math.round(ts*0.38)}px serif`;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillStyle = event.hidden ? 'rgba(255,255,255,0.3)' : 'rgba(255,255,255,0.9)';
+        ctx.fillText(etype.icon || '?', cx2, cy2);
+      }
+      if (event.triggered) {
+        ctx.fillStyle = 'rgba(0,0,0,0.5)';
+        ctx.fillRect(px, py, ts, ts);
+      }
+    }
+
+    // Party token
+    if (tile.x === activeMap.partyPos.x && tile.y === activeMap.partyPos.y) {
+      const cx2 = px+ts/2, cy2 = py+ts/2;
+      // Outer glow
+      const grad = ctx.createRadialGradient(cx2,cy2,0,cx2,cy2,ts*0.6);
+      grad.addColorStop(0, 'rgba(136,68,204,0.6)');
+      grad.addColorStop(1, 'rgba(136,68,204,0)');
+      ctx.fillStyle = grad;
+      ctx.fillRect(px-ts*0.2, py-ts*0.2, ts*1.4, ts*1.4);
+      // Token
+      ctx.beginPath();
+      ctx.arc(cx2, cy2, ts*0.32, 0, Math.PI*2);
+      ctx.fillStyle = '#8844cc';
+      ctx.fill();
+      ctx.strokeStyle = '#cc99ff';
+      ctx.lineWidth = 2;
+      ctx.stroke();
+      if (showLabels) {
+        ctx.font = `${Math.round(ts*0.32)}px serif`;
+        ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+        ctx.fillStyle = 'white';
+        ctx.fillText('🧑', cx2, cy2);
+      }
+    }
+
+    // Grid
+    if (showGrid) {
+      ctx.strokeStyle = 'rgba(255,255,255,0.04)';
+      ctx.lineWidth = 0.5;
+      ctx.strokeRect(px+0.5, py+0.5, ts-1, ts-1);
+    }
+
+    // Fog of war
+    if (showFog) {
+      if (!isRevealed) {
+        ctx.fillStyle = biome.fogColor || 'rgba(0,0,0,0.95)';
+        ctx.fillRect(px, py, ts, ts);
+      } else if (!isVisible) {
+        ctx.fillStyle = 'rgba(0,0,0,0.55)';
+        ctx.fillRect(px, py, ts, ts);
+      }
+    }
+  });
+
+  // Active zone highlight
+  if (activeZoneId) {
+    const zone = VGMap.getZone(activeMap, activeZoneId);
+    if (zone) {
+      ctx.strokeStyle = zone.color + 'ff';
+      ctx.lineWidth = 2;
+      zone.tiles.forEach(({x,y}) => {
+        ctx.strokeRect(x*ts+1, y*ts+1, ts-2, ts-2);
+      });
+    }
+  }
+
+  // Sight radius indicator (subtle)
+  if (activeMap.partyPos) {
+    const px2 = activeMap.partyPos.x * ts + ts/2;
+    const py2 = activeMap.partyPos.y * ts + ts/2;
+    ctx.beginPath();
+    ctx.arc(px2, py2, activeMap.sightRadius * ts, 0, Math.PI*2);
+    ctx.strokeStyle = 'rgba(136,68,204,0.15)';
+    ctx.lineWidth = 1;
+    ctx.setLineDash([4,4]);
+    ctx.stroke();
+    ctx.setLineDash([]);
+  }
+
+  // Zone labels
+  if (showLabels) {
+    activeMap.zones.forEach(zone => {
+      if (zone.tiles.length === 0) return;
+      const xs = zone.tiles.map(t=>t.x), ys = zone.tiles.map(t=>t.y);
+      const cx2 = (Math.min(...xs) + Math.max(...xs)) / 2 * ts + ts/2;
+      const cy2 = (Math.min(...ys) + Math.max(...ys)) / 2 * ts + ts/2;
+      // check visibility
+      const centerX = Math.round((Math.min(...xs)+Math.max(...xs))/2);
+      const centerY = Math.round((Math.min(...ys)+Math.max(...ys))/2);
+      if (showFog && !VGMap.isTileRevealed(activeMap, centerX, centerY)) return;
+      ctx.font = `bold ${Math.max(9, Math.round(ts*0.22))}px Cinzel, serif`;
+      ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.fillStyle = 'rgba(200,160,96,0.5)';
+      ctx.fillText(zone.name.toUpperCase(), cx2, cy2);
+    });
+  }
+}
+
+// ── Fog ────────────────────────────────────────────────────
+function toggleFog() { showFog = !showFog; redraw(); toast(showFog ? 'Fog ON' : 'Fog OFF', 'ok'); }
+function revealAll() { if (!activeMap) return; VGMap.revealAll(activeMap); redraw(); toast('All tiles revealed','ok'); }
+function resetFog() { if (!activeMap) return; VGMap.resetFog(activeMap); redraw(); toast('Fog reset','ok'); }
+
+// ── Party Movement ─────────────────────────────────────────
+function moveParty(dx, dy) {
+  if (!activeMap) return;
+  const nx = activeMap.partyPos.x + dx;
+  const ny = activeMap.partyPos.y + dy;
+  const result = VGMap.moveParty(activeMap, nx, ny);
+  activeMap = result.map;
+  if (!result.moved) { toast('Impassable!','err'); return; }
+  updatePartyDisplay();
+  if (result.event) showEventPopup(result.event, nx, ny);
+  redraw();
+  saveCurrentMap(true);
+  // Sync to VGEngine session
+  if (window.VGEngine) VGEngine.persistSession();
+}
+
+function teleportParty() { openModal('modal-teleport'); }
+function doTeleport() {
+  if (!activeMap) return;
+  const x = parseInt(document.getElementById('teleX').value);
+  const y = parseInt(document.getElementById('teleY').value);
+  const override = document.getElementById('teleIgnoreWalls').checked;
+  const result = VGMap.moveParty(activeMap, x, y, override);
+  activeMap = result.map;
+  updatePartyDisplay();
+  if (result.event) showEventPopup(result.event, x, y);
+  redraw();
+  saveCurrentMap(true);
+  closeModal('modal-teleport');
+  toast(`Party moved to ${x},${y}`, 'ok');
+}
+
+function resetPartyStart() {
+  if (!activeMap) return;
+  activeMap.partyPos = { x: 1, y: activeMap.rows - 2 };
+  VGMap.revealAround(activeMap, activeMap.partyPos.x, activeMap.partyPos.y, activeMap.sightRadius);
+  updatePartyDisplay(); redraw(); saveCurrentMap(true);
+}
+
+function updatePartyDisplay() {
+  if (!activeMap) return;
+  const p = activeMap.partyPos;
+  document.getElementById('partyPosDisplay').textContent = `${p.x}, ${p.y}`;
+  document.getElementById('statusParty').textContent = `${p.x},${p.y}`;
+}
+
+// ── Event Popup ────────────────────────────────────────────
+function showEventPopup(event, x, y) {
+  const existing = document.querySelector('.event-popup');
+  if (existing) existing.remove();
+
+  const etype = VGMap.EVENT_TYPES[event.type] || {};
+  const popup = document.createElement('div');
+  popup.className = 'event-popup';
+  popup.innerHTML = `
+    <div style="font-size:10px;letter-spacing:3px;text-transform:uppercase;color:${etype.color||'#888'};margin-bottom:8px;">${etype.icon} Event Triggered</div>
+    <div style="font-family:'Cinzel',serif;font-size:16px;color:#e0d0f0;margin-bottom:8px;">${event.label || etype.label}</div>
+    ${event.description ? `<div style="font-size:14px;color:#907888;line-height:1.7;margin-bottom:12px;font-style:italic;">${event.description}</div>` : ''}
+    ${event.loot ? `<div style="font-size:13px;color:#22aa44;margin-bottom:8px;">🎁 ${event.loot}</div>` : ''}
+    ${event.dc ? `<div style="font-size:13px;color:#aaaaff;margin-bottom:8px;">🎲 DC ${event.dc} Check Required</div>` : ''}
+    ${event.sceneId ? `<div style="font-size:13px;color:#c8a060;margin-bottom:8px;">🎭 Triggers Scene</div>` : ''}
+    <div style="display:flex;gap:6px;justify-content:flex-end;margin-top:8px;">
+      ${event.sceneId ? `<button class="btn btn-gold btn-sm" onclick="launchLinkedScene('${event.sceneId}');this.closest('.event-popup').remove()">▶ Launch Scene</button>` : ''}
+      <button class="btn btn-ghost btn-sm" onclick="this.closest('.event-popup').remove()">Dismiss</button>
+    </div>`;
+  popup.style.left = '50%'; popup.style.top = '50%';
+  popup.style.transform = 'translate(-50%,-50%)';
+  document.body.appendChild(popup);
+  setTimeout(() => { if (popup.parentNode) popup.remove(); }, 12000);
+}
+
+function launchLinkedScene(sceneId) {
+  if (window.VGEngine) {
+    const campaign = VGEngine.getState().campaign;
+    if (campaign) {
+      VGEngine.getState().session.currentSceneId = sceneId;
+      VGEngine.persistSession();
+      toast('Scene activated in session!', 'ok');
+    }
+  }
+}
+
+// ── Inspect ────────────────────────────────────────────────
+function inspectTile(x, y) {
+  if (!activeMap) return;
+  const tile = VGMap.getTile(activeMap, x, y);
+  if (!tile) return;
+  inspectedTile = tile;
+  const event = VGMap.getEventAt(activeMap, x, y);
+  const zone = tile.zoneId ? VGMap.getZone(activeMap, tile.zoneId) : null;
+  const etype = event ? VGMap.EVENT_TYPES[event.type] : null;
+
+  document.getElementById('inspector').innerHTML = `
+    <div style="padding:0;">
+      <div style="font-family:'Cinzel',serif;font-size:12px;color:var(--gold);margin-bottom:10px;">Tile ${x},${y}</div>
+      <div class="info-row">Type: <strong>${tile.type}</strong></div>
+      <div class="info-row">Zone: <strong>${zone?.name || '—'}</strong></div>
+      ${zone ? `<div style="font-size:12px;color:var(--text-muted);font-style:italic;margin-bottom:8px;">${zone.description||''}</div>` : ''}
+      ${event ? `
+        <div style="border:1px solid ${etype?.color||'#888'}44;border-radius:3px;padding:10px;margin-top:8px;background:${etype?.color||'#888'}11;">
+          <div style="font-size:10px;letter-spacing:2px;text-transform:uppercase;color:${etype?.color||'#888'};margin-bottom:6px;">${etype?.icon} ${etype?.label}</div>
+          <div class="info-row">${event.label}</div>
+          ${event.description ? `<div style="font-size:12px;color:var(--text-muted);font-style:italic;margin-top:4px;">${event.description}</div>` : ''}
+          ${event.dc ? `<div style="font-size:12px;color:#aaaaff;margin-top:4px;">DC: ${event.dc}</div>` : ''}
+          ${event.loot ? `<div style="font-size:12px;color:var(--green);margin-top:4px;">Loot: ${event.loot}</div>` : ''}
+          <div style="font-size:11px;color:var(--text-muted);margin-top:6px;">Hidden: ${event.hidden?'Yes':'No'} | Triggered: ${event.triggerCount}× | Repeatable: ${event.repeatable?'Yes':'No'}</div>
+          <div style="display:flex;gap:6px;margin-top:10px;">
+            <button class="btn btn-gold btn-sm" onclick="editEventAt(${x},${y})">✏ Edit</button>
+            <button class="btn btn-red btn-sm" onclick="deleteEventAt(${x},${y})">🗑</button>
+          </div>
+        </div>` : `
+        <button class="btn btn-ghost btn-sm" style="margin-top:10px;width:100%;justify-content:center;" onclick="openEventModal(${x},${y})">+ Add Event Here</button>`}
+    </div>`;
+}
+
+// ── Event Modal ────────────────────────────────────────────
+function openEventModal(x, y) {
+  document.getElementById('eventTileX').value = x;
+  document.getElementById('eventTileY').value = y;
+  document.getElementById('editEventId').value = '';
+  document.getElementById('eventModalTitle').textContent = `Place Event at ${x},${y}`;
+  document.getElementById('eventType').value = activeEventType;
+  document.getElementById('eventLabel').value = '';
+  document.getElementById('eventDesc').value = '';
+  document.getElementById('eventDC').value = 12;
+  document.getElementById('eventLoot').value = '';
+  document.getElementById('eventHidden').checked = false;
+  document.getElementById('eventRepeatable').checked = false;
+  document.getElementById('removeEventBtn').style.display = 'none';
+  populateSceneDropdown();
+  updateEventTypeUI();
+  openModal('modal-event');
+}
+
+function editEventAt(x, y) {
+  if (!activeMap) return;
+  const event = VGMap.getEventAt(activeMap, x, y);
+  if (!event) return;
+  document.getElementById('eventTileX').value = x;
+  document.getElementById('eventTileY').value = y;
+  document.getElementById('editEventId').value = event.id;
+  document.getElementById('eventModalTitle').textContent = `Edit Event at ${x},${y}`;
+  document.getElementById('eventType').value = event.type;
+  document.getElementById('eventLabel').value = event.label || '';
+  document.getElementById('eventDesc').value = event.description || '';
+  document.getElementById('eventDC').value = event.dc || 12;
+  document.getElementById('eventLoot').value = event.loot || '';
+  document.getElementById('eventHidden').checked = event.hidden || false;
+  document.getElementById('eventRepeatable').checked = event.repeatable || false;
+  document.getElementById('removeEventBtn').style.display = '';
+  populateSceneDropdown(event.sceneId);
+  updateEventTypeUI();
+  openModal('modal-event');
+}
+
+function deleteEventAt(x, y) {
+  if (!activeMap) return;
+  const ev = VGMap.getEventAt(activeMap, x, y);
+  if (ev) { VGMap.removeEvent(activeMap, ev.id); saveCurrentMap(true); redraw(); renderEventList(); inspectTile(x,y); toast('Event removed','ok'); }
+}
+
+function removeCurrentEvent() {
+  const x = parseInt(document.getElementById('eventTileX').value);
+  const y = parseInt(document.getElementById('eventTileY').value);
+  deleteEventAt(x, y);
+  closeModal('modal-event');
+}
+
+function updateEventTypeUI() {
+  const t = document.getElementById('eventType').value;
+  document.getElementById('eventDCRow').style.display = ['locked','combat'].includes(t) ? '' : 'none';
+  document.getElementById('eventLootRow').style.display = t === 'loot' ? '' : 'none';
+  document.getElementById('eventSceneRow').style.display = ['scene','npc','combat'].includes(t) ? '' : 'none';
+}
+
+function populateSceneDropdown(selectedId) {
+  const campaign = window.VGEngine ? VGEngine.getState().campaign : null;
+  const sel = document.getElementById('eventSceneId');
+  sel.innerHTML = '<option value="">— No scene linked —</option>';
+  if (campaign) {
+    campaign.scenes.forEach(s => {
+      const opt = document.createElement('option');
+      opt.value = s.id; opt.textContent = s.title;
+      sel.appendChild(opt);
+    });
+  }
+  if (selectedId) sel.value = selectedId;
+}
+
+function saveEventForm() {
+  if (!activeMap) return;
+  const x = parseInt(document.getElementById('eventTileX').value);
+  const y = parseInt(document.getElementById('eventTileY').value);
+  const data = {
+    x, y,
+    type: document.getElementById('eventType').value,
+    label: document.getElementById('eventLabel').value,
+    description: document.getElementById('eventDesc').value,
+    sceneId: document.getElementById('eventSceneId').value || null,
+    dc: parseInt(document.getElementById('eventDC').value) || null,
+    loot: document.getElementById('eventLoot').value || null,
+    hidden: document.getElementById('eventHidden').checked,
+    repeatable: document.getElementById('eventRepeatable').checked,
+  };
+  const existingId = document.getElementById('editEventId').value;
+  if (existingId) VGMap.removeEvent(activeMap, existingId);
+  const { map } = VGMap.placeEvent(activeMap, data);
+  activeMap = map;
+  saveCurrentMap(true);
+  redraw();
+  renderEventList();
+  closeModal('modal-event');
+  toast('Event saved!', 'ok');
+}
+
+// ── Zone Modal ─────────────────────────────────────────────
+function openZoneModal() { openModal('modal-zone'); }
+function saveZoneForm() {
+  if (!activeMap) return;
+  const tiles = VGMap.rectTiles(
+    parseInt(document.getElementById('zx1').value),
+    parseInt(document.getElementById('zy1').value),
+    parseInt(document.getElementById('zx2').value),
+    parseInt(document.getElementById('zy2').value),
+  );
+  const { map } = VGMap.createZone(activeMap, {
+    name: document.getElementById('zoneName').value || 'Zone',
+    description: document.getElementById('zoneDesc').value,
+    biome: document.getElementById('zoneBiome').value,
+    color: document.getElementById('zoneColor').value,
+    tiles,
+  });
+  activeMap = map;
+  saveCurrentMap(true);
+  redraw();
+  renderZoneList();
+  closeModal('modal-zone');
+  toast('Zone created!', 'ok');
+}
+
+// ── Zone List ──────────────────────────────────────────────
+function renderZoneList() {
+  if (!activeMap) return;
+  const el = document.getElementById('zoneList');
+  if (!activeMap.zones.length) { el.innerHTML = '<div style="color:var(--text-muted);font-size:12px;font-style:italic;">No zones yet.</div>'; return; }
+  el.innerHTML = activeMap.zones.map(z => `
+    <div class="zone-item ${activeZoneId===z.id?'active':''}" onclick="selectZone('${z.id}')" style="border-left:3px solid ${z.color};">
+      <strong style="color:${z.color};">${z.name}</strong><br>
+      <span style="color:var(--text-muted);font-size:11px;">${z.tiles.length} tiles · ${z.biome}</span>
+    </div>`).join('');
+}
+
+function selectZone(id) {
+  activeZoneId = activeZoneId === id ? null : id;
+  renderZoneList();
+  redraw();
+  if (activeZoneId) toast(`Zone selected: ${VGMap.getZone(activeMap,id)?.name}. Use Zone tool to paint tiles.`, 'ok');
+}
+
+// ── Event List ─────────────────────────────────────────────
+function renderEventList() {
+  if (!activeMap) return;
+  const el = document.getElementById('eventList');
+  document.getElementById('eventCount').textContent = `(${activeMap.events.length})`;
+  if (!activeMap.events.length) { el.innerHTML = '<div style="color:var(--text-muted);font-size:12px;font-style:italic;">No events placed.</div>'; return; }
+  el.innerHTML = activeMap.events.map(ev => {
+    const etype = VGMap.EVENT_TYPES[ev.type] || {};
+    return `<div class="event-item" onclick="inspectTile(${ev.x},${ev.y})" style="border-left:3px solid ${etype.color||'#888'};">
+      <span>${etype.icon||'?'}</span>
+      <div><div style="font-size:12px;color:var(--text);">${ev.label||etype.label}</div>
+      <div style="font-size:10px;color:var(--text-muted);">${ev.x},${ev.y} ${ev.hidden?'· hidden':''} ${ev.triggered?'· triggered':''}</div></div>
+    </div>`;
+  }).join('');
+}
+
+// ── New Map ────────────────────────────────────────────────
+function openNewMapModal() { openModal('modal-newmap'); }
+function createNewMap() {
+  const map = VGMap.createMap({
+    name: document.getElementById('newMapName').value || 'New Map',
+    biome: document.getElementById('newMapBiome').value,
+    cols: parseInt(document.getElementById('newMapCols').value),
+    rows: parseInt(document.getElementById('newMapRows').value),
+    sightRadius: parseInt(document.getElementById('newMapSight').value),
+  });
+  activeMapId = map.id;
+  activeMap = map;
+  VGMap.revealAround(activeMap, activeMap.partyPos.x, activeMap.partyPos.y, activeMap.sightRadius);
+  loadMapList();
+  document.getElementById('mapSelect').value = map.id;
+  document.getElementById('mapNameLabel').textContent = map.name;
+  initCanvas(); redraw(); renderZoneList(); renderEventList(); updatePartyDisplay();
+  closeModal('modal-newmap');
+  toast('Map created!', 'ok');
+}
+
+// ── Preset Map ─────────────────────────────────────────────
+function openPresetModal() { openModal('modal-preset'); }
+function loadPreset(preset) {
+  const campaign = window.VGEngine ? VGEngine.getState().campaign : null;
+  const map = VGMap.generatePresetMap(preset, campaign?.id || null);
+  activeMapId = map.id;
+  activeMap = map;
+  loadMapList();
+  document.getElementById('mapSelect').value = map.id;
+  document.getElementById('mapNameLabel').textContent = map.name;
+  initCanvas(); fitToView(); redraw(); renderZoneList(); renderEventList(); updatePartyDisplay();
+  closeModal('modal-preset');
+  toast(`Loaded: ${map.name}`, 'ok');
+}
+
+// ── Random Seed ────────────────────────────────────────────
+function openRandomSeedModal() { openModal('modal-seed'); }
+function buildSeedTypeChecks() {
+  const el = document.getElementById('seedTypeChecks');
+  el.innerHTML = Object.entries(VGMap.EVENT_TYPES).map(([k,v]) => `
+    <label style="display:flex;align-items:center;gap:6px;font-size:13px;cursor:pointer;color:${v.color};">
+      <input type="checkbox" class="seedTypeCheck" value="${k}" checked> ${v.icon} ${v.label}
+    </label>`).join('');
+}
+function runSeedEvents() {
+  if (!activeMap) return;
+  const types = [...document.querySelectorAll('.seedTypeCheck:checked')].map(c => c.value);
+  if (!types.length) { toast('Select at least one type.','err'); return; }
+  const density = parseFloat(document.getElementById('seedDensity').value);
+  const preserve = document.getElementById('seedPreserve').checked;
+  VGMap.seedRandomEvents(activeMap, { density, types, preserveManual: preserve });
+  saveCurrentMap(true); redraw(); renderEventList();
+  closeModal('modal-seed');
+  toast(`Seeded ${Math.round(density*100)}% event density!`, 'ok');
+}
+
+// ── Palette builders ────────────────────────────────────────
+function buildTilePalette() {
+  document.getElementById('tilePalette').innerHTML = Object.entries(VGMap.TILE_TYPES).map(([k,v]) => `
+    <div class="tile-swatch ${k===activeTileType?'active':''}" id="ts-${k}" onclick="setActiveTile('${k}')"
+      style="background:${v.color};color:#ffffff88;font-size:11px;">${v.icon||''} ${v.label}</div>`).join('');
+}
+function setActiveTile(type) {
+  activeTileType = type;
+  document.querySelectorAll('.tile-swatch').forEach(s => s.classList.remove('active'));
+  document.getElementById('ts-' + type)?.classList.add('active');
+}
+function buildEventTypePalette() {
+  document.getElementById('eventTypePalette').innerHTML = Object.entries(VGMap.EVENT_TYPES).map(([k,v]) => `
+    <button class="event-btn ${k===activeEventType?'active':''}" id="et-${k}" onclick="setActiveEventType('${k}')"
+      style="border-left:3px solid ${v.color};">${v.icon} ${v.label}</button>`).join('');
+}
+function setActiveEventType(type) {
+  activeEventType = type;
+  document.querySelectorAll('.event-btn').forEach(b => b.classList.remove('active'));
+  document.getElementById('et-' + type)?.classList.add('active');
+}
+
+// ── Campaign link ──────────────────────────────────────────
+function loadCampaignList() {
+  if (!window.VGEngine) return;
+  const campaigns = VGEngine.getCampaigns();
+  const sel = document.getElementById('sessionCampaignSelect');
+  sel.innerHTML = '<option value="">— Select Campaign —</option>' + campaigns.map(c=>`<option value="${c.id}">${c.name}</option>`).join('');
+}
+function linkMapToCampaign() {
+  const cid = document.getElementById('sessionCampaignSelect').value;
+  if (!cid || !activeMap) return;
+  activeMap.campaignId = cid;
+  saveCurrentMap(true);
+  // Also start/resume session
+  VGEngine.resumeSession() || VGEngine.startSession(cid);
+  toast('Map linked to campaign!', 'ok');
+}
+
+// ── Save / Export ──────────────────────────────────────────
+function saveCurrentMap(silent = false) {
+  if (!activeMap) return;
+  VGMap.saveMap(activeMap);
+  if (!silent) toast('Map saved!', 'ok');
+}
+
+function openPlayerMap() {
+  if (activeMapId) localStorage.setItem('vg_active_map_id', activeMapId);
+  window.open('https://vg.highfunctioningchaos.living/map/player-map.html', '_blank');
+}
+
+// ── Modals ─────────────────────────────────────────────────
+function openModal(id) { document.getElementById(id).classList.add('open'); }
+function closeModal(id) { document.getElementById(id).classList.remove('open'); }
+document.querySelectorAll('.modal-overlay').forEach(o => o.addEventListener('click', e => { if(e.target===o) o.classList.remove('open'); }));
+
+// ── Toast ──────────────────────────────────────────────────
+let toastT;
+function toast(msg, type='ok') {
+  const el = document.getElementById('toast');
+  el.textContent = msg; el.className = `toast ${type} show`;
+  clearTimeout(toastT); toastT = setTimeout(()=>el.classList.remove('show'), 3000);
+}
+</script>
+</body>
+</html>

@@ -1,0 +1,401 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Velvet Grimoire — Player View</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@400;600&family=Crimson+Pro:ital,wght@0,300;0,400;0,600;1,300;1,400&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg: #07060a;
+  --surface: #100d14;
+  --surface2: #16121e;
+  --border: rgba(150,120,200,0.15);
+  --border-hot: rgba(150,120,200,0.4);
+  --purple: #9060c0;
+  --purple-dim: #604080;
+  --gold: #c8a060;
+  --text: #ddd0f0;
+  --text-dim: #8878a0;
+  --text-muted: #3a3050;
+  --fight: #cc3322;
+  --flight: #2266bb;
+  --freeze: #aa8800;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: 'Crimson Pro', serif;
+  font-size: 17px;
+  min-height: 100vh;
+  display: flex; flex-direction: column;
+}
+
+/* Atmospheric */
+body::before {
+  content: '';
+  position: fixed; inset: 0; z-index: 0;
+  background: radial-gradient(ellipse at 30% 0%, rgba(90,40,140,0.2) 0%, transparent 60%),
+              radial-gradient(ellipse at 80% 100%, rgba(40,20,80,0.25) 0%, transparent 60%);
+  pointer-events: none;
+}
+
+.container { position: relative; z-index: 1; max-width: 720px; margin: 0 auto; padding: 32px 20px 80px; width: 100%; }
+
+/* Header */
+.header { text-align: center; margin-bottom: 40px; padding-bottom: 24px; border-bottom: 1px solid var(--border); }
+.header-eyebrow { font-size: 10px; letter-spacing: 5px; text-transform: uppercase; color: var(--text-muted); margin-bottom: 8px; }
+.header-title { font-family: 'Cinzel', serif; font-size: clamp(20px, 5vw, 32px); color: var(--purple); font-weight: 400; letter-spacing: 2px; }
+.header-role { font-size: 13px; color: var(--text-dim); margin-top: 6px; font-style: italic; }
+
+/* NPC badge */
+.npc-badge {
+  display: inline-flex; align-items: center; gap: 12px;
+  background: rgba(90,40,140,0.15); border: 1px solid rgba(150,120,200,0.2);
+  border-radius: 6px; padding: 14px 20px; margin-bottom: 28px; width: 100%;
+}
+.npc-avatar {
+  width: 48px; height: 48px; border-radius: 50%;
+  background: linear-gradient(135deg, var(--purple-dim), #302050);
+  border: 1px solid var(--border-hot);
+  display: flex; align-items: center; justify-content: center;
+  font-size: 22px; flex-shrink: 0;
+}
+.npc-info-name { font-family: 'Cinzel', serif; font-size: 16px; color: var(--text); }
+.npc-info-role { font-size: 13px; color: var(--text-dim); margin-top: 2px; font-style: italic; }
+
+/* Scene blocks */
+.scene-title {
+  font-family: 'Cinzel', serif; font-size: 22px; color: var(--gold);
+  margin-bottom: 20px; letter-spacing: 1px;
+  padding-bottom: 12px; border-bottom: 1px solid rgba(200,160,96,0.15);
+}
+
+.dm-narrative {
+  background: rgba(0,0,0,0.4); border: 1px solid var(--border);
+  border-left: 3px solid rgba(200,160,96,0.3);
+  border-radius: 0 4px 4px 0; padding: 20px 20px;
+  line-height: 1.9; color: var(--text-dim); font-size: 16px;
+  margin-bottom: 24px; white-space: pre-wrap;
+  font-style: italic;
+}
+.dm-narrative-label { font-size: 10px; letter-spacing: 3px; text-transform: uppercase; color: var(--text-muted); margin-bottom: 8px; }
+
+.npc-cue {
+  background: rgba(90,40,140,0.12); border: 1px solid rgba(150,120,200,0.2);
+  border-left: 3px solid var(--purple);
+  border-radius: 0 6px 6px 0; padding: 20px;
+  line-height: 1.9; font-size: 16px; color: #b0a0d8;
+  margin-bottom: 28px; white-space: pre-wrap;
+  animation: fadeInUp 0.6s ease;
+}
+.npc-cue-label {
+  font-size: 10px; letter-spacing: 3px; text-transform: uppercase;
+  color: var(--purple-dim); margin-bottom: 8px;
+}
+
+@keyframes fadeInUp {
+  from { opacity: 0; transform: translateY(12px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+/* Branch result */
+.branch-result {
+  border-radius: 6px; padding: 20px; margin-bottom: 20px;
+  line-height: 1.9; font-size: 16px; white-space: pre-wrap;
+  animation: fadeInUp 0.5s ease;
+}
+.branch-result.fight { background: rgba(204,51,34,0.1); border: 1px solid rgba(204,51,34,0.25); border-left: 3px solid var(--fight); }
+.branch-result.flight { background: rgba(34,102,187,0.1); border: 1px solid rgba(34,102,187,0.25); border-left: 3px solid var(--flight); }
+.branch-result.freeze { background: rgba(170,136,0,0.1); border: 1px solid rgba(170,136,0,0.25); border-left: 3px solid var(--freeze); }
+
+/* Attributes display */
+.attrs { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 20px; }
+.attr-chip {
+  padding: 6px 14px; border-radius: 20px; font-size: 13px;
+  border: 1px solid var(--border); color: var(--text-dim);
+  background: var(--surface2);
+}
+.attr-chip strong { color: var(--gold); font-family: 'Cinzel', serif; }
+
+/* Dice display */
+.dice-area {
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: 6px; padding: 20px; margin-bottom: 24px;
+  text-align: center;
+}
+.dice-label { font-size: 11px; letter-spacing: 3px; text-transform: uppercase; color: var(--text-muted); margin-bottom: 12px; }
+.dice-row { display: flex; gap: 8px; justify-content: center; flex-wrap: wrap; }
+.die-btn {
+  padding: 10px 16px; border-radius: 4px; cursor: pointer;
+  border: 1px solid var(--border); background: var(--surface2);
+  color: var(--text-dim); font-family: 'Cinzel', serif; font-size: 12px;
+  transition: all 0.15s; letter-spacing: 1px;
+}
+.die-btn:hover { border-color: var(--border-hot); color: var(--text); transform: translateY(-2px); }
+.die-btn.rolling { animation: shake 0.4s ease; }
+@keyframes shake { 0%,100%{transform:translateX(0)} 25%{transform:translateX(-4px) rotate(-5deg)} 75%{transform:translateX(4px) rotate(5deg)} }
+.roll-output { font-family: 'Cinzel', serif; font-size: 42px; color: var(--purple); margin: 12px 0 4px; }
+.roll-detail { font-size: 13px; color: var(--text-muted); }
+
+/* Choice response area */
+.response-area { margin-top: 28px; }
+.response-label { font-size: 11px; letter-spacing: 3px; text-transform: uppercase; color: var(--text-muted); margin-bottom: 10px; }
+textarea.npc-response {
+  width: 100%; background: rgba(90,40,140,0.1);
+  border: 1px solid rgba(150,120,200,0.2); border-radius: 4px;
+  padding: 14px; color: var(--text); font-family: 'Crimson Pro', serif;
+  font-size: 16px; line-height: 1.7; outline: none; resize: vertical; min-height: 120px;
+  transition: border 0.15s;
+}
+textarea.npc-response:focus { border-color: var(--border-hot); }
+.btn {
+  display: inline-flex; align-items: center; gap: 8px;
+  padding: 12px 24px; border-radius: 4px; cursor: pointer;
+  font-family: 'Cinzel', serif; font-size: 12px; letter-spacing: 2px;
+  text-transform: uppercase; border: 1px solid; transition: all 0.15s;
+}
+.btn-purple { background: rgba(90,40,140,0.25); border-color: var(--purple-dim); color: #c0a0e0; }
+.btn-purple:hover { background: rgba(90,40,140,0.4); }
+.btn-ghost { background: transparent; border-color: var(--border); color: var(--text-dim); }
+.btn-ghost:hover { border-color: var(--border-hot); color: var(--text); }
+
+/* Status */
+.status-bar {
+  position: fixed; bottom: 0; left: 0; right: 0; z-index: 10;
+  background: rgba(7,6,10,0.95); border-top: 1px solid var(--border);
+  padding: 12px 24px; display: flex; align-items: center; justify-content: space-between;
+  backdrop-filter: blur(10px);
+}
+.status-dot { width: 8px; height: 8px; border-radius: 50%; background: #444; display: inline-block; margin-right: 6px; }
+.status-dot.active { background: #8844ff; box-shadow: 0 0 8px #8844ff; }
+
+/* No session */
+.no-session {
+  text-align: center; padding: 60px 20px;
+  color: var(--text-dim); font-style: italic;
+}
+.no-session h2 { font-family: 'Cinzel', serif; color: var(--purple); font-size: 22px; margin-bottom: 12px; font-weight: 400; }
+
+/* Tags */
+.tag { display: inline-block; padding: 3px 10px; border-radius: 20px; font-size: 11px; border: 1px solid rgba(150,120,200,0.2); color: var(--purple-dim); background: rgba(90,40,140,0.08); margin: 2px; }
+
+/* History */
+.history-mini { margin-top: 24px; border-top: 1px solid var(--border); padding-top: 16px; }
+.history-item { display: flex; justify-content: space-between; font-size: 13px; padding: 6px 0; border-bottom: 1px solid rgba(255,255,255,0.04); color: var(--text-dim); }
+.history-item strong { color: var(--text); }
+
+::-webkit-scrollbar { width: 5px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--text-muted); border-radius: 3px; }
+</style>
+</head>
+<body>
+
+<div class="container">
+  <div class="header">
+    <div class="header-eyebrow">✦ Velvet Grimoire ✦</div>
+    <h1 class="header-title">NPC Player View</h1>
+    <p class="header-role">You are the scene's counterpart. React. Resist. Reveal.</p>
+  </div>
+
+  <div id="mainContent"></div>
+</div>
+
+<div class="status-bar">
+  <div>
+    <span class="status-dot" id="statusDot"></span>
+    <span id="statusText" style="font-size:13px;color:var(--text-dim);">Waiting for session...</span>
+  </div>
+  <div style="display:flex;gap:8px;">
+    <button class="btn btn-ghost" style="padding:6px 12px;font-size:10px;" onclick="refreshView()">🔄 Refresh</button>
+    <button class="btn btn-ghost" style="padding:6px 12px;font-size:10px;" onclick="toggleHistory()">📖 Log</button>
+  </div>
+</div>
+
+<script src="../engine/engine.js"></script>
+<script>
+
+let showHistory = false;
+let playerRoll = null;
+
+function init() {
+  const session = VGEngine.resumeSession();
+  render(session);
+  setInterval(refreshView, 8000); // auto-refresh every 8s
+}
+
+function refreshView() {
+  const session = VGEngine.resumeSession();
+  render(session);
+}
+
+function render(session) {
+  const content = document.getElementById('mainContent');
+  const dot = document.getElementById('statusDot');
+  const statusText = document.getElementById('statusText');
+
+  if (!session?.id) {
+    dot.className = 'status-dot';
+    statusText.textContent = 'No active session — DM has not started a game.';
+    content.innerHTML = `
+      <div class="no-session">
+        <h2>The Grimoire Awaits</h2>
+        <p>No session is currently active.<br>Wait for the DM to launch a campaign.</p>
+        <p style="margin-top:20px;font-size:14px;opacity:0.5;">This view refreshes automatically every 8 seconds.</p>
+      </div>`;
+    return;
+  }
+
+  const campaign = VGEngine.getState().campaign;
+  const scene = VGEngine.getCurrentScene();
+  dot.className = 'status-dot active';
+  statusText.textContent = `Active — ${campaign?.name || 'Campaign'}`;
+
+  if (!scene) {
+    content.innerHTML = `
+      <div class="npc-badge">
+        <div class="npc-avatar">✦</div>
+        <div><div class="npc-info-name">${campaign?.npc?.name || 'NPC'}</div><div class="npc-info-role">${campaign?.npc?.role || ''}</div></div>
+      </div>
+      <div class="no-session">
+        <h2 style="color:var(--gold);">✦ Scene Complete ✦</h2>
+        <p>The campaign has reached its conclusion, or the DM has not set a next scene.</p>
+      </div>
+      ${renderHistorySection()}`;
+    return;
+  }
+
+  const history = VGEngine.getSessionHistory();
+  const lastEntry = history[history.length - 1];
+  const branchResult = lastEntry?.sceneId !== scene.id && lastEntry ? lastEntry : null;
+
+  content.innerHTML = `
+    <div class="npc-badge">
+      <div class="npc-avatar">🎭</div>
+      <div>
+        <div class="npc-info-name">${campaign?.npc?.name || 'NPC Character'}</div>
+        <div class="npc-info-role">${campaign?.npc?.role || ''} — ${campaign?.npc?.personality?.slice(0,60) || ''}</div>
+      </div>
+    </div>
+
+    <div class="scene-title">${scene.title}</div>
+
+    ${scene.attributes ? `
+    <div class="attrs">
+      ${Object.entries(scene.attributes).map(([k,v]) => `<div class="attr-chip">${k}: <strong>${v}/10</strong></div>`).join('')}
+    </div>` : ''}
+
+    ${(scene.tags||[]).length ? `<div style="margin-bottom:16px;">${scene.tags.map(t=>`<span class="tag">${t}</span>`).join('')}</div>` : ''}
+
+    <div class="dm-narrative-label">📖 Scene Narrative (What's happening)</div>
+    <div class="dm-narrative">${scene.narrative || '[No narrative written for this scene]'}</div>
+
+    <div class="npc-cue-label">🎭 Your Character Cue (Private — for you only)</div>
+    <div class="npc-cue">${scene.npcCue || '[No NPC cue written for this scene]'}</div>
+
+    <div class="dice-area">
+      <div class="dice-label">Your Dice Roller</div>
+      <div class="dice-row">
+        <button class="die-btn" onclick="playerRollDie(4)">d4</button>
+        <button class="die-btn" onclick="playerRollDie(6)">d6</button>
+        <button class="die-btn" onclick="playerRollDie(8)">d8</button>
+        <button class="die-btn" onclick="playerRollDie(10)">d10</button>
+        <button class="die-btn" onclick="playerRollDie(12)">d12</button>
+        <button class="die-btn" onclick="playerRollDie(20)">d20</button>
+      </div>
+      <div class="roll-output" id="playerRollOutput">—</div>
+      <div class="roll-detail" id="playerRollDetail">Roll to assist your response</div>
+    </div>
+
+    <div class="response-area">
+      <div class="response-label">Your Character's Response (Notes / Roleplay Log)</div>
+      <textarea class="npc-response" id="npcResponseText" placeholder="Write how your character reacts, what they say, how they move... This is your private roleplay scratchpad.">${loadNPCResponse(scene.id)}</textarea>
+      <div style="display:flex;gap:8px;margin-top:10px;">
+        <button class="btn btn-purple" onclick="saveNPCResponse('${scene.id}')">💾 Save Response</button>
+        <button class="btn btn-ghost" onclick="clearNPCResponse('${scene.id}')">Clear</button>
+      </div>
+    </div>
+
+    ${renderHistorySection()}
+  `;
+}
+
+function playerRollDie(sides) {
+  const result = Math.floor(Math.random() * sides) + 1;
+  playerRoll = { result, sides };
+  const output = document.getElementById('playerRollOutput');
+  const detail = document.getElementById('playerRollDetail');
+  if (output) {
+    output.textContent = result;
+    detail.textContent = `d${sides} — ${getRollFlair(result, sides)}`;
+    const btn = [...document.querySelectorAll('.die-btn')].find(b => b.textContent === 'd'+sides);
+    if (btn) { btn.classList.add('rolling'); setTimeout(() => btn.classList.remove('rolling'), 400); }
+  }
+}
+
+function getRollFlair(result, sides) {
+  if (result === sides) return '✦ Critical Success!';
+  if (result === 1) return '💀 Critical Fail';
+  if (result >= sides * 0.8) return 'Strong result';
+  if (result <= sides * 0.2) return 'Weak result';
+  return 'Moderate result';
+}
+
+function loadNPCResponse(sceneId) {
+  return localStorage.getItem('npc_response_' + sceneId) || '';
+}
+
+function saveNPCResponse(sceneId) {
+  const text = document.getElementById('npcResponseText')?.value || '';
+  localStorage.setItem('npc_response_' + sceneId, text);
+  showToast('Response saved!');
+}
+
+function clearNPCResponse(sceneId) {
+  localStorage.removeItem('npc_response_' + sceneId);
+  const el = document.getElementById('npcResponseText');
+  if (el) el.value = '';
+}
+
+function renderHistorySection() {
+  if (!showHistory) return `<div class="history-mini"><p style="font-size:13px;color:var(--text-muted);font-style:italic;">Click "Log" in the toolbar to see session history.</p></div>`;
+  const history = VGEngine.getSessionHistory();
+  if (!history.length) return `<div class="history-mini"><p style="font-size:13px;color:var(--text-muted);font-style:italic;">No history yet.</p></div>`;
+  const colors = { fight:'#ff8070', flight:'#80a8ff', freeze:'#ffcc50' };
+  return `<div class="history-mini">
+    <div style="font-size:10px;letter-spacing:3px;text-transform:uppercase;color:var(--text-muted);margin-bottom:10px;">Session History</div>
+    ${history.map((h,i) => `
+      <div class="history-item">
+        <span><strong>${i+1}. ${h.sceneTitle}</strong></span>
+        <span style="color:${colors[h.choiceMade]}">${h.choiceMade.toUpperCase()}${h.roll ? ` — d20:${h.roll.result}` : ''}</span>
+      </div>`).join('')}
+  </div>`;
+}
+
+function toggleHistory() {
+  showHistory = !showHistory;
+  refreshView();
+}
+
+let toastTimeout;
+function showToast(msg) {
+  let toast = document.getElementById('playerToast');
+  if (!toast) {
+    toast = document.createElement('div');
+    toast.id = 'playerToast';
+    toast.style.cssText = 'position:fixed;bottom:70px;right:20px;background:#201830;border:1px solid rgba(150,120,200,0.4);color:#c0a0e0;padding:12px 20px;border-radius:4px;font-size:14px;z-index:999;transition:opacity 0.3s;';
+    document.body.appendChild(toast);
+  }
+  toast.textContent = msg;
+  toast.style.opacity = '1';
+  clearTimeout(toastTimeout);
+  toastTimeout = setTimeout(() => { toast.style.opacity = '0'; }, 2500);
+}
+
+init();
+</script>
+</body>
+</html>

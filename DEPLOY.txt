@@ -1,0 +1,84 @@
+# ============================================================
+# VELVET GRIMOIRE — VPS Deployment
+# Domain:  vg.highfunctioningchaos.living
+# Server:  144.126.155.14 (Contabo VPS)
+# OS:      Ubuntu 22.04 + Apache
+# ============================================================
+
+
+## STEP 1 — Upload Files
+
+rsync -avz --delete ./dnd-final/ root@144.126.155.14:/var/www/html/grimoire/
+
+
+## STEP 2 — Permissions
+
+ssh root@144.126.155.14
+chmod -R 755 /var/www/html/grimoire/
+chown -R www-data:www-data /var/www/html/grimoire/
+
+
+## STEP 3 — Apache Virtual Host
+
+nano /etc/apache2/sites-available/grimoire.conf
+
+# ─────────────────────────────────────────────────────────────
+<VirtualHost *:80>
+    ServerName vg.highfunctioningchaos.living
+    DocumentRoot /var/www/html/grimoire
+
+    <Directory /var/www/html/grimoire>
+        Options -Indexes +FollowSymLinks
+        AllowOverride All
+        Require all granted
+    </Directory>
+
+    ErrorLog ${APACHE_LOG_DIR}/grimoire_error.log
+    CustomLog ${APACHE_LOG_DIR}/grimoire_access.log combined
+</VirtualHost>
+# ─────────────────────────────────────────────────────────────
+
+a2ensite grimoire.conf
+a2enmod rewrite
+systemctl reload apache2
+
+
+## STEP 4 — SSL
+
+certbot --apache -d vg.highfunctioningchaos.living
+
+
+## STEP 5 — Cloudflare DNS
+
+# Type: A  |  Name: d&d-vg  |  Content: 144.126.155.14  |  Proxy: ON
+
+
+## LIVE URLs
+
+# Landing (age gate):   https://vg.highfunctioningchaos.living/
+# DM Admin:             https://vg.highfunctioningchaos.living/admin/
+# NPC Scene View:       https://vg.highfunctioningchaos.living/player/player.html
+# DM Map Editor:        https://vg.highfunctioningchaos.living/map/dm-map.html
+# NPC Player Map:       https://vg.highfunctioningchaos.living/map/player-map.html
+
+
+## FILE STRUCTURE
+
+/var/www/html/grimoire/
+├── index.html              <- Landing page + age gate
+├── admin/index.html        <- DM Admin Panel
+├── player/player.html      <- NPC Scene View
+├── map/dm-map.html         <- DM Map Editor
+├── map/player-map.html     <- NPC Player Map
+└── engine/
+    ├── engine.js
+    └── map-engine.js
+
+
+## NOTE: & in subdomain
+
+If Cloudflare or Certbot rejects "d&d-vg" due to the & character,
+use "dnd-vg" as the subdomain instead and update:
+  - Cloudflare DNS A record name
+  - Apache ServerName
+  - All href links in the HTML files
