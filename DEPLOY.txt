@@ -1,84 +1,98 @@
-# ============================================================
-# VELVET GRIMOIRE — VPS Deployment
-# Domain:  vg.highfunctioningchaos.living
-# Server:  144.126.155.14 (Contabo VPS)
-# OS:      Ubuntu 22.04 + Apache
-# ============================================================
+VELVET GRIMOIRE DEPLOY NOTES
 
+This folder can run two ways:
 
-## STEP 1 — Upload Files
+1. Static-only mode: HTML/CSS/JS with browser-local state.
+2. VPS backend mode: one Node service hosts the files and provides /api table-code sync.
 
-rsync -avz --delete ./dnd-final/ root@144.126.155.14:/var/www/html/grimoire/
+STATIC HOSTING
+Upload the entire folder contents to your web root.
 
+Required paths:
+- /index.html
+- /admin/index.html
+- /player/player.html
+- /map/dm-map.html
+- /map/player-map.html
+- /dice/index.html
+- /engine/engine.js
+- /engine/map-engine.js
+- /engine/intimacy.js
+- /engine/sync.js
+- /demo/demo-data.js
+- /server.js
+- /package.json
+- /deploy/velvetgrimore.service
+- /deploy/nginx-velvetgrimore.conf
+- /pause.html
+- /compact/SAFETY.md
+- /compact/TAGS.md
 
-## STEP 2 — Permissions
+LOCAL TEST
+You can open index.html directly, but a local server is better because the app uses absolute paths such as /pause.html.
 
-ssh root@144.126.155.14
-chmod -R 755 /var/www/html/grimoire/
-chown -R www-data:www-data /var/www/html/grimoire/
+Backend local test:
 
+  node server.js
 
-## STEP 3 — Apache Virtual Host
+Then open:
 
-nano /etc/apache2/sites-available/grimoire.conf
+  http://localhost:8765/
 
-# ─────────────────────────────────────────────────────────────
-<VirtualHost *:80>
-    ServerName vg.highfunctioningchaos.living
-    DocumentRoot /var/www/html/grimoire
+REMOTE MULTIPLAYER ON VPS
 
-    <Directory /var/www/html/grimoire>
-        Options -Indexes +FollowSymLinks
-        AllowOverride All
-        Require all granted
-    </Directory>
+Copy this entire folder to:
 
-    ErrorLog ${APACHE_LOG_DIR}/grimoire_error.log
-    CustomLog ${APACHE_LOG_DIR}/grimoire_access.log combined
-</VirtualHost>
-# ─────────────────────────────────────────────────────────────
+  /var/www/velvetgrimore
 
-a2ensite grimoire.conf
-a2enmod rewrite
-systemctl reload apache2
+Install Node.js 18+ on the VPS if needed.
 
+Install the service:
 
-## STEP 4 — SSL
+  cp deploy/velvetgrimore.service /etc/systemd/system/velvetgrimore.service
+  systemctl daemon-reload
+  systemctl enable --now velvetgrimore
 
-certbot --apache -d vg.highfunctioningchaos.living
+Check it:
 
+  systemctl status velvetgrimore
+  curl http://127.0.0.1:8765/api/health
 
-## STEP 5 — Cloudflare DNS
+Nginx:
 
-# Type: A  |  Name: d&d-vg  |  Content: 144.126.155.14  |  Proxy: ON
+Use deploy/nginx-velvetgrimore.conf as the base server block, or add this location to the existing site:
 
+  location / {
+      proxy_pass http://127.0.0.1:8765;
+      proxy_http_version 1.1;
+      proxy_set_header Host $host;
+      proxy_set_header X-Real-IP $remote_addr;
+      proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+      proxy_set_header X-Forwarded-Proto $scheme;
+  }
 
-## LIVE URLs
+Reload nginx after config test:
 
-# Landing (age gate):   https://vg.highfunctioningchaos.living/
-# DM Admin:             https://vg.highfunctioningchaos.living/admin/
-# NPC Scene View:       https://vg.highfunctioningchaos.living/player/player.html
-# DM Map Editor:        https://vg.highfunctioningchaos.living/map/dm-map.html
-# NPC Player Map:       https://vg.highfunctioningchaos.living/map/player-map.html
+  nginx -t
+  systemctl reload nginx
 
+In the app:
 
-## FILE STRUCTURE
+1. Open Admin -> Settings -> Remote Multiplayer.
+2. Leave Backend URL as the site URL.
+3. Click Create.
+4. Share the table code with the player.
+5. Player opens /player/player.html, enters the code, and joins.
 
-/var/www/html/grimoire/
-├── index.html              <- Landing page + age gate
-├── admin/index.html        <- DM Admin Panel
-├── player/player.html      <- NPC Scene View
-├── map/dm-map.html         <- DM Map Editor
-├── map/player-map.html     <- NPC Player Map
-└── engine/
-    ├── engine.js
-    └── map-engine.js
+DATA MODEL
+All app data is browser-local unless a Discord webhook is configured.
+The Intimate Table layer stores scene chat, consent ceiling, heat, and want/boundary cards in browser storage.
+In VPS backend mode, synced table snapshots are also stored on the VPS in server-data/tables.json.
 
+Before real play:
+1. Open Admin -> Settings -> Backup Everything.
+2. Save the exported JSON somewhere safe.
+3. Repeat after each major campaign-editing session.
 
-## NOTE: & in subdomain
-
-If Cloudflare or Certbot rejects "d&d-vg" due to the & character,
-use "dnd-vg" as the subdomain instead and update:
-  - Cloudflare DNS A record name
-  - Apache ServerName
-  - All href links in the HTML files
+DISCORD
+Discord webhook integration is optional. If enabled, selected events are sent to Discord.

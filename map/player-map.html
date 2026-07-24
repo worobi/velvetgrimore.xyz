@@ -119,6 +119,7 @@ body{background:var(--bg);color:var(--text);font-family:'Crimson Pro',serif;heig
 
 <script src="../engine/engine.js"></script>
 <script src="../engine/map-engine.js"></script>
+<script src="../engine/sync.js"></script>
 <script>
 
 let activeMap = null;
@@ -131,6 +132,7 @@ const ctx = canvas.getContext('2d');
 const TILE_SIZE = 40;
 
 function init() {
+  if (window.VGSync) VGSync.start({ onApply: refreshMap });
   const mapId = localStorage.getItem('vg_active_map_id');
   if (mapId) {
     activeMap = VGMap.getMap(mapId);

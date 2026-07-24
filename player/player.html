@@ -21,6 +21,7 @@
   --text-muted: #3a3050;
   --fight: #cc3322;
   --flight: #2266bb;
+  --fawn: #7a3a8a;
   --freeze: #aa8800;
 }
 * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -109,6 +110,7 @@ body::before {
 }
 .branch-result.fight { background: rgba(204,51,34,0.1); border: 1px solid rgba(204,51,34,0.25); border-left: 3px solid var(--fight); }
 .branch-result.flight { background: rgba(34,102,187,0.1); border: 1px solid rgba(34,102,187,0.25); border-left: 3px solid var(--flight); }
+.branch-result.fawn   { background: rgba(122,58,138,0.1); border: 1px solid rgba(122,58,138,0.25); border-left: 3px solid var(--fawn); }
 .branch-result.freeze { background: rgba(170,136,0,0.1); border: 1px solid rgba(170,136,0,0.25); border-left: 3px solid var(--freeze); }
 
 /* Attributes display */
@@ -182,10 +184,161 @@ textarea.npc-response:focus { border-color: var(--border-hot); }
 /* Tags */
 .tag { display: inline-block; padding: 3px 10px; border-radius: 20px; font-size: 11px; border: 1px solid rgba(150,120,200,0.2); color: var(--purple-dim); background: rgba(90,40,140,0.08); margin: 2px; }
 
+.ward-entry, .signal-banner {
+  background: rgba(16,13,20,0.9);
+  border: 1px solid rgba(150,120,200,0.22);
+  border-radius: 8px;
+  padding: 22px 20px;
+  margin-bottom: 24px;
+}
+.ward-entry-title, .signal-banner-title {
+  font-family: 'Cinzel', serif;
+  font-size: 18px;
+  color: var(--gold);
+  margin-bottom: 8px;
+}
+.ward-stack-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 12px 0;
+}
+.ward-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border-radius: 18px;
+  border: 1px solid rgba(200,160,96,0.2);
+  background: rgba(200,160,96,0.08);
+  color: var(--text-dim);
+  font-size: 12px;
+}
+.ward-entry-actions {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-top: 16px;
+}
+.session-summary {
+  background: rgba(255,255,255,0.025);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 14px 16px;
+  margin-bottom: 22px;
+}
+.summary-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+.summary-label {
+  font-size: 9px;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  margin-bottom: 5px;
+}
+.summary-value {
+  color: var(--text-dim);
+  font-size: 14px;
+  line-height: 1.4;
+}
+.summary-value strong {
+  color: var(--gold);
+  font-family: 'Cinzel', serif;
+  font-size: 13px;
+  letter-spacing: 1px;
+}
+.intimacy-card {
+  background: linear-gradient(135deg, rgba(90,40,140,0.14), rgba(0,0,0,0.26));
+  border: 1px solid rgba(150,120,200,0.28);
+  border-radius: 8px;
+  padding: 18px;
+  margin-bottom: 24px;
+}
+.intimacy-title {
+  font-family: 'Cinzel', serif;
+  font-size: 16px;
+  color: var(--gold);
+  letter-spacing: 1px;
+  margin-bottom: 6px;
+}
+.compat-line { color: var(--text-dim); font-size: 13px; line-height: 1.6; margin-bottom: 12px; }
+.intimacy-toolbar { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 12px; }
+.intimacy-toolbar label, .intimacy-card label {
+  display: block;
+  font-size: 10px;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  margin-bottom: 6px;
+}
+.intimacy-card select, .intimacy-card input, .intimacy-card textarea {
+  width: 100%;
+  background: rgba(255,255,255,0.035);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 9px 10px;
+  color: var(--text);
+  font-family: 'Crimson Pro', serif;
+  font-size: 15px;
+}
+.heat-track { height: 10px; border-radius: 999px; background: rgba(255,255,255,0.06); overflow: hidden; border: 1px solid var(--border); }
+.heat-fill { height: 100%; background: linear-gradient(90deg, #604080, #c8a060, #dd4422); }
+.prompt-row, .want-grid { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px; }
+.prompt-chip, .want-chip {
+  border: 1px solid var(--border);
+  background: rgba(255,255,255,0.035);
+  color: var(--text-dim);
+  border-radius: 18px;
+  padding: 6px 10px;
+  font-size: 12px;
+  cursor: pointer;
+}
+.want-chip input { width: auto; margin-right: 5px; }
+.chat-log { max-height: 240px; overflow-y: auto; display: grid; gap: 8px; padding: 10px; background: rgba(0,0,0,0.25); border: 1px solid var(--border); border-radius: 6px; margin-bottom: 12px; }
+.chat-msg { border-left: 3px solid var(--purple); padding: 8px 10px; background: rgba(255,255,255,0.025); border-radius: 4px; }
+.chat-msg.dm { border-left-color: var(--gold); }
+.chat-meta { display: flex; justify-content: space-between; gap: 10px; color: var(--text-muted); font-size: 10px; letter-spacing: 1px; text-transform: uppercase; margin-bottom: 4px; }
+.intimacy-chat-row { display: grid; grid-template-columns: 130px 1fr auto; gap: 8px; align-items: start; }
+.remote-join {
+  background: rgba(90,40,140,0.12);
+  border: 1px solid rgba(150,120,200,0.24);
+  border-radius: 8px;
+  padding: 18px;
+  margin-top: 18px;
+}
+.remote-join-row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 8px;
+  margin-top: 10px;
+}
+.remote-join input {
+  width: 100%;
+  background: rgba(255,255,255,0.035);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 10px 12px;
+  color: var(--text);
+  text-transform: uppercase;
+}
+.locked {
+  opacity: 0.5;
+  pointer-events: none;
+}
+
 /* History */
 .history-mini { margin-top: 24px; border-top: 1px solid var(--border); padding-top: 16px; }
 .history-item { display: flex; justify-content: space-between; font-size: 13px; padding: 6px 0; border-bottom: 1px solid rgba(255,255,255,0.04); color: var(--text-dim); }
 .history-item strong { color: var(--text); }
+
+@media (max-width: 640px) {
+  .summary-grid { grid-template-columns: 1fr; }
+  .intimacy-toolbar, .intimacy-chat-row { grid-template-columns: 1fr; }
+  .remote-join-row { grid-template-columns: 1fr; }
+}
 
 ::-webkit-scrollbar { width: 5px; }
 ::-webkit-scrollbar-track { background: transparent; }
@@ -216,18 +369,28 @@ textarea.npc-response:focus { border-color: var(--border-hot); }
 </div>
 
 <script src="../engine/engine.js"></script>
+<script src="../engine/intimacy.js"></script>
+<script src="../engine/sync.js"></script>
 <script>
 
 let showHistory = false;
 let playerRoll = null;
+let lastProcessedSignalAt = sessionStorage.getItem('vg_player_last_signal_at') || '';
+let activeSafetySignal = null;
 
 function init() {
+  initRemoteSync();
+  const latest = VGEngine.getLatestSignal ? VGEngine.getLatestSignal() : null;
+  activeSafetySignal = latest || null;
+  if (!lastProcessedSignalAt && latest?.at) lastProcessedSignalAt = latest.at;
   const session = VGEngine.resumeSession();
   render(session);
-  setInterval(refreshView, 8000); // auto-refresh every 8s
+  setInterval(refreshView, 2000);
+  window.addEventListener('storage', onSharedStateChange);
 }
 
 function refreshView() {
+  pollSafetyRuntime();
   const session = VGEngine.resumeSession();
   render(session);
 }
@@ -244,15 +407,27 @@ function render(session) {
       <div class="no-session">
         <h2>The Grimoire Awaits</h2>
         <p>No session is currently active.<br>Wait for the DM to launch a campaign.</p>
-        <p style="margin-top:20px;font-size:14px;opacity:0.5;">This view refreshes automatically every 8 seconds.</p>
+        <p style="margin-top:20px;font-size:14px;opacity:0.5;">This view refreshes automatically every 2 seconds.</p>
+        <div class="remote-join">
+          <div style="font-family:'Cinzel',serif;color:var(--gold);font-size:14px;letter-spacing:1px;margin-bottom:6px;">Join Remote Table</div>
+          <p style="font-size:14px;line-height:1.6;">Enter the table code from the Warden. The backend URL defaults to this site.</p>
+          <div class="remote-join-row">
+            <input type="text" id="playerSyncCode" placeholder="ABC123">
+            <button class="btn btn-purple" onclick="joinRemoteTableFromPlayer()">Join</button>
+          </div>
+          <div id="playerSyncStatus" style="font-size:13px;color:var(--text-muted);margin-top:10px;"></div>
+        </div>
       </div>`;
     return;
   }
 
   const campaign = VGEngine.getState().campaign;
   const scene = VGEngine.getCurrentScene();
+  const holdActive = activeSafetySignal?.tier === 'hold';
   dot.className = 'status-dot active';
-  statusText.textContent = `Active — ${campaign?.name || 'Campaign'}`;
+  statusText.textContent = holdActive
+    ? 'Hold active — page paused'
+    : `Active — ${campaign?.name || 'Campaign'}`;
 
   if (!scene) {
     content.innerHTML = `
@@ -271,6 +446,74 @@ function render(session) {
   const history = VGEngine.getSessionHistory();
   const lastEntry = history[history.length - 1];
   const branchResult = lastEntry?.sceneId !== scene.id && lastEntry ? lastEntry : null;
+  const signalBanner = renderSignalBanner();
+  const sessionSummary = renderSessionSummary(campaign, scene, history, holdActive);
+  const intimacyPanel = renderIntimacyPanel('player', session, scene, holdActive);
+
+  // Protagonist sign-off — blocks play until the player has reviewed the
+  // DM's hard-gated ward list. Happens once per campaign, before any scene.
+  if (campaign && campaign.protagonistAckedWards == null) {
+    content.innerHTML = renderProtagonistSignoff(campaign, signalBanner);
+    return;
+  }
+
+  // Per-scene gate: if the scene carries a hard-gated ward the protagonist
+  // declined, hold the scene closed and offer to signal the Ember.
+  const gatedRegistry = (VGEngine.WARD_HARD_GATED || []);
+  const declined = (scene.elementWards || []).filter(w =>
+    gatedRegistry.includes(w) && !(campaign.protagonistAckedWards || []).includes(w)
+  );
+  if (declined.length && !hasEnteredScene(session, scene)) {
+    content.innerHTML = `
+      ${signalBanner}
+      ${sessionSummary}
+      <div class="ward-entry">
+        <div class="ward-entry-title">🔒 Ward declined</div>
+        <div style="color:var(--text-dim);line-height:1.8;">
+          This scene carries a ward you declined at sign-off: <strong>${declined.map(escapeHtml).join(', ')}</strong>.
+          The scene will not open here. Signal the Ember so the DM can redraw or pause.
+        </div>
+        <div class="ward-entry-actions">
+          <button class="btn btn-ghost" onclick="signalEmber()">🕯️ Signal the Ember</button>
+          <button class="btn btn-ghost" onclick="openResignModal()">Revisit sign-off</button>
+        </div>
+      </div>
+      ${renderHistorySection()}
+    `;
+    return;
+  }
+
+  if (!hasEnteredScene(session, scene)) {
+    content.innerHTML = `
+      <div class="npc-badge">
+        <div class="npc-avatar">🎭</div>
+        <div>
+          <div class="npc-info-name">${campaign?.npc?.name || 'NPC Character'}</div>
+          <div class="npc-info-role">${campaign?.npc?.role || ''} — ${campaign?.npc?.personality?.slice(0,60) || ''}</div>
+        </div>
+      </div>
+
+      ${signalBanner}
+      ${sessionSummary}
+
+      <div class="ward-entry">
+        <div class="ward-entry-title">✦ Warded Entry ✦</div>
+        <div style="color:var(--text-dim);line-height:1.8;">Review the ward stack before the scene opens. Enter in your own time, or signal the Ember first.</div>
+        <div class="ward-stack-row">${(scene.elementWards || []).map(w => `<span class="ward-pill">${escapeHtml(w)}</span>`).join('') || '<span class="ward-pill">No element wards</span>'}</div>
+        <div class="ward-stack-row">
+          <span class="ward-pill">Intensity: ${escapeHtml(scene.intensityWard || 'suggested')}</span>
+          <span class="ward-pill">Frame: ${escapeHtml(scene.frameWard || 'consensual-if')}</span>
+        </div>
+        <div class="ward-entry-actions">
+          <button class="btn btn-purple" onclick="enterScene('${session.id}','${scene.id}')" ${holdActive ? 'disabled style="opacity:0.5;cursor:not-allowed;"' : ''}>✦ Enter the Scene</button>
+          <button class="btn btn-ghost" onclick="signalEmber()">🕯️ Signal the Ember</button>
+        </div>
+      </div>
+
+      ${renderHistorySection()}
+    `;
+    return;
+  }
 
   content.innerHTML = `
     <div class="npc-badge">
@@ -280,6 +523,9 @@ function render(session) {
         <div class="npc-info-role">${campaign?.npc?.role || ''} — ${campaign?.npc?.personality?.slice(0,60) || ''}</div>
       </div>
     </div>
+
+    ${signalBanner}
+    ${sessionSummary}
 
     <div class="scene-title">${scene.title}</div>
 
@@ -296,7 +542,7 @@ function render(session) {
     <div class="npc-cue-label">🎭 Your Character Cue (Private — for you only)</div>
     <div class="npc-cue">${scene.npcCue || '[No NPC cue written for this scene]'}</div>
 
-    <div class="dice-area">
+    <div class="dice-area ${holdActive ? 'locked' : ''}">
       <div class="dice-label">Your Dice Roller</div>
       <div class="dice-row">
         <button class="die-btn" onclick="playerRollDie(4)">d4</button>
@@ -310,7 +556,7 @@ function render(session) {
       <div class="roll-detail" id="playerRollDetail">Roll to assist your response</div>
     </div>
 
-    <div class="response-area">
+    <div class="response-area ${holdActive ? 'locked' : ''}">
       <div class="response-label">Your Character's Response (Notes / Roleplay Log)</div>
       <textarea class="npc-response" id="npcResponseText" placeholder="Write how your character reacts, what they say, how they move... This is your private roleplay scratchpad.">${loadNPCResponse(scene.id)}</textarea>
       <div style="display:flex;gap:8px;margin-top:10px;">
@@ -319,11 +565,51 @@ function render(session) {
       </div>
     </div>
 
+    ${intimacyPanel}
+
     ${renderHistorySection()}
   `;
 }
 
+function initRemoteSync() {
+  if (!window.VGSync) return;
+  VGSync.start({
+    onApply: () => {
+      VGEngine.resumeSession();
+      refreshView();
+    },
+    onStatus: updatePlayerSyncStatus,
+    onError: err => updatePlayerSyncStatus({ ...VGSync.status(), error: err.message }),
+  });
+}
+
+function updatePlayerSyncStatus(status = (window.VGSync ? VGSync.status() : null)) {
+  const el = document.getElementById('playerSyncStatus');
+  if (!el || !status) return;
+  el.textContent = status.enabled && status.code
+    ? `Connected to table ${status.code} · revision ${status.lastRev || 0}${status.error ? ` · ${status.error}` : ''}`
+    : (status.error ? `Sync error: ${status.error}` : '');
+}
+
+async function joinRemoteTableFromPlayer() {
+  if (!window.VGSync) return;
+  const code = document.getElementById('playerSyncCode')?.value || '';
+  try {
+    await VGSync.joinTable(code);
+    localStorage.setItem('vg_role', 'player');
+    VGEngine.resumeSession();
+    refreshView();
+  } catch (err) {
+    updatePlayerSyncStatus({ ...VGSync.status(), error: err.message });
+    showToast(`Join failed: ${err.message}`);
+  }
+}
+
 function playerRollDie(sides) {
+  if (activeSafetySignal?.tier === 'hold') {
+    showToast('Hold is active. Wait for the page to resume before rolling.');
+    return;
+  }
   const result = Math.floor(Math.random() * sides) + 1;
   playerRoll = { result, sides };
   const output = document.getElementById('playerRollOutput');
@@ -349,12 +635,20 @@ function loadNPCResponse(sceneId) {
 }
 
 function saveNPCResponse(sceneId) {
+  if (activeSafetySignal?.tier === 'hold') {
+    showToast('Hold is active. Writing is paused for now.');
+    return;
+  }
   const text = document.getElementById('npcResponseText')?.value || '';
   localStorage.setItem('npc_response_' + sceneId, text);
   showToast('Response saved!');
 }
 
 function clearNPCResponse(sceneId) {
+  if (activeSafetySignal?.tier === 'hold') {
+    showToast('Hold is active. Writing is paused for now.');
+    return;
+  }
   localStorage.removeItem('npc_response_' + sceneId);
   const el = document.getElementById('npcResponseText');
   if (el) el.value = '';
@@ -364,7 +658,7 @@ function renderHistorySection() {
   if (!showHistory) return `<div class="history-mini"><p style="font-size:13px;color:var(--text-muted);font-style:italic;">Click "Log" in the toolbar to see session history.</p></div>`;
   const history = VGEngine.getSessionHistory();
   if (!history.length) return `<div class="history-mini"><p style="font-size:13px;color:var(--text-muted);font-style:italic;">No history yet.</p></div>`;
-  const colors = { fight:'#ff8070', flight:'#80a8ff', freeze:'#ffcc50' };
+  const colors = { fight:'#ff8070', flight:'#80a8ff', fawn:'#c090e0', freeze:'#ffcc50' };
   return `<div class="history-mini">
     <div style="font-size:10px;letter-spacing:3px;text-transform:uppercase;color:var(--text-muted);margin-bottom:10px;">Session History</div>
     ${history.map((h,i) => `
@@ -375,9 +669,339 @@ function renderHistorySection() {
   </div>`;
 }
 
+function renderSessionSummary(campaign, scene, history, holdActive) {
+  const last = history[history.length - 1];
+  const wardText = [
+    ...(scene?.elementWards || []),
+    scene?.intensityWard ? `intensity:${scene.intensityWard}` : '',
+    scene?.frameWard ? `frame:${scene.frameWard}` : '',
+  ].filter(Boolean).slice(0, 6).map(escapeHtml).join(', ') || 'No wards set';
+  const lastText = last
+    ? `${escapeHtml(last.choiceMade || 'choice')} from ${escapeHtml(last.sceneTitle || 'previous scene')}`
+    : 'No choices logged yet';
+  return `
+    <div class="session-summary">
+      <div class="summary-grid">
+        <div>
+          <div class="summary-label">Session</div>
+          <div class="summary-value"><strong>${holdActive ? 'Hold active' : 'Live'}</strong><br>${escapeHtml(campaign?.name || 'Campaign')}</div>
+        </div>
+        <div>
+          <div class="summary-label">Current Wards</div>
+          <div class="summary-value">${wardText}</div>
+        </div>
+        <div>
+          <div class="summary-label">Last Choice</div>
+          <div class="summary-value">${lastText}</div>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+function renderIntimacyPanel(role, session, scene, holdActive) {
+  if (!window.VGIntimacy || !session?.id || !scene?.id) return '';
+  const state = VGIntimacy.getSceneState(session.id, scene.id);
+  const effective = VGIntimacy.effectiveConsent(state);
+  const messages = VGIntimacy.getMessages(session.id, scene.id);
+  const cards = VGIntimacy.getCards(session.id, scene.id);
+  const card = cards[role] || { want: [], pace: 'slow', ceiling: 'suggestive', notTonight: '', note: '' };
+  const compatibility = VGIntimacy.getCompatibility(session.id, scene.id);
+  const prompts = VGIntimacy.getPrompts(effective.id);
+  return `
+    <div class="intimacy-card">
+      <div class="intimacy-title">Intimate Table</div>
+      <div class="compat-line">
+        Consent ceiling: <strong style="color:var(--gold);">${effective.label}</strong> ·
+        Heat: <strong style="color:var(--gold);">${state.heat}/100 ${VGIntimacy.heatLabel(state.heat)}</strong> ·
+        ${escapeHtml(compatibility.label)}
+      </div>
+      <div class="intimacy-toolbar">
+        <div>
+          <label>My consent ceiling</label>
+          <select onchange="setIntimacyConsent('${role}', this.value)" ${holdActive ? 'disabled' : ''}>
+            ${VGIntimacy.CONSENT_LEVELS.map(level => `<option value="${level.id}" ${state.consent?.[role] === level.id ? 'selected' : ''}>${level.label}</option>`).join('')}
+          </select>
+        </div>
+        <div>
+          <label>Heat / tension</label>
+          <input type="range" min="0" max="100" value="${state.heat}" oninput="setIntimacyHeat(this.value)" ${holdActive ? 'disabled' : ''}>
+          <div class="heat-track"><div class="heat-fill" style="width:${state.heat}%"></div></div>
+        </div>
+      </div>
+
+      <details style="margin-bottom:14px;">
+        <summary style="cursor:pointer;color:var(--gold);font-family:'Cinzel',serif;font-size:12px;letter-spacing:2px;text-transform:uppercase;">Private want / boundary card</summary>
+        <div style="margin-top:12px;">
+          <div class="want-grid">
+            ${VGIntimacy.WANT_OPTIONS.map(want => `<label class="want-chip"><input type="checkbox" data-want-${role}="${escapeHtml(want)}" ${(card.want || []).includes(want) ? 'checked' : ''}>${escapeHtml(want)}</label>`).join('')}
+          </div>
+          <div class="intimacy-toolbar">
+            <div>
+              <label>Pace</label>
+              <select id="intimacyPace-${role}">
+                ${['slow','steady','intense','fade-to-black'].map(p => `<option value="${p}" ${card.pace === p ? 'selected' : ''}>${p}</option>`).join('')}
+              </select>
+            </div>
+            <div>
+              <label>Ceiling</label>
+              <select id="intimacyCeiling-${role}">
+                ${VGIntimacy.CONSENT_LEVELS.map(level => `<option value="${level.id}" ${card.ceiling === level.id ? 'selected' : ''}>${level.label}</option>`).join('')}
+              </select>
+            </div>
+          </div>
+          <label>Not tonight</label>
+          <input type="text" id="intimacyNotTonight-${role}" value="${escapeHtml(card.notTonight)}" placeholder="Anything this scene should avoid tonight">
+          <label style="margin-top:10px;">Note</label>
+          <textarea id="intimacyNote-${role}" rows="2" placeholder="What would make this scene work better?">${escapeHtml(card.note)}</textarea>
+          <button class="btn btn-ghost" style="margin-top:10px;" onclick="saveIntimacyCard('${role}')">Save Card</button>
+        </div>
+      </details>
+
+      <div class="prompt-row">
+        ${prompts.map(prompt => `<button class="prompt-chip" onclick='insertIntimacyPrompt("${role}", ${JSON.stringify(prompt.text)}, ${prompt.heat})'>${escapeHtml(prompt.label)}</button>`).join('')}
+      </div>
+
+      <div class="chat-log">
+        ${messages.length ? messages.map(msg => `
+          <div class="chat-msg ${msg.role}">
+            <div class="chat-meta"><span>${escapeHtml(msg.role)} · ${escapeHtml(VGIntimacy.modeLabel(msg.mode))}</span><span>${new Date(msg.at).toLocaleTimeString()}</span></div>
+            <div style="white-space:pre-wrap;line-height:1.55;color:var(--text);">${escapeHtml(msg.text)}</div>
+          </div>
+        `).join('') : `<div style="color:var(--text-muted);font-style:italic;font-size:14px;">No intimate table messages yet. Use prompts to stay in-character and consent-aware.</div>`}
+      </div>
+      <div class="intimacy-chat-row ${holdActive ? 'locked' : ''}">
+        <select id="intimacyMode-${role}">
+          ${VGIntimacy.MODES.map(mode => `<option value="${mode.id}">${mode.label}</option>`).join('')}
+        </select>
+        <textarea id="intimacyText-${role}" rows="3" placeholder="Write an in-character line, action, whisper, or OOC check-in..."></textarea>
+        <button class="btn btn-purple" onclick="sendIntimacyMessage('${role}')">Send</button>
+      </div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px;">
+        <button class="btn btn-ghost" onclick="setIntimacyConsent('${role}', 'veil')">Veil / Fade Out</button>
+        <button class="btn btn-ghost" onclick="window.open('/pause.html#hearth','_blank','noopener')">Hearth</button>
+      </div>
+    </div>
+  `;
+}
+
+function getIntimacyContext() {
+  const session = VGEngine.getState().session;
+  const scene = VGEngine.getCurrentScene();
+  if (!session?.id || !scene?.id) return null;
+  return { session, scene };
+}
+
+function setIntimacyConsent(role, level) {
+  const ctx = getIntimacyContext();
+  if (!ctx || !window.VGIntimacy) return;
+  VGIntimacy.setConsent(ctx.session.id, ctx.scene.id, role, level);
+  if (level === 'veil') showToast('Veil selected. Turn the camera away or move to Hearth.');
+  refreshView();
+}
+
+function setIntimacyHeat(value) {
+  const ctx = getIntimacyContext();
+  if (!ctx || !window.VGIntimacy) return;
+  VGIntimacy.setHeat(ctx.session.id, ctx.scene.id, value);
+  refreshView();
+}
+
+function insertIntimacyPrompt(role, text, heat) {
+  const input = document.getElementById(`intimacyText-${role}`);
+  if (!input) return;
+  input.value = input.value ? `${input.value}\n${text}` : text;
+  input.dataset.heat = String(heat || 0);
+  input.focus();
+}
+
+function sendIntimacyMessage(role) {
+  if (activeSafetySignal?.tier === 'hold') {
+    showToast('Hold is active. Resume before sending.');
+    return;
+  }
+  const ctx = getIntimacyContext();
+  if (!ctx || !window.VGIntimacy) return;
+  const input = document.getElementById(`intimacyText-${role}`);
+  const mode = document.getElementById(`intimacyMode-${role}`)?.value || 'spoken';
+  const heatDelta = Number(input?.dataset.heat || 0);
+  const sent = VGIntimacy.sendMessage({
+    sessionId: ctx.session.id,
+    sceneId: ctx.scene.id,
+    role,
+    mode,
+    text: input?.value || '',
+    heatDelta,
+  });
+  if (sent && input) {
+    input.value = '';
+    input.dataset.heat = '0';
+    refreshView();
+  }
+}
+
+function saveIntimacyCard(role) {
+  const ctx = getIntimacyContext();
+  if (!ctx || !window.VGIntimacy) return;
+  const want = [...document.querySelectorAll(`[data-want-${role}]`)]
+    .filter(el => el.checked)
+    .map(el => el.getAttribute(`data-want-${role}`));
+  VGIntimacy.saveCard(ctx.session.id, ctx.scene.id, role, {
+    want,
+    pace: document.getElementById(`intimacyPace-${role}`)?.value || 'slow',
+    ceiling: document.getElementById(`intimacyCeiling-${role}`)?.value || 'suggestive',
+    notTonight: document.getElementById(`intimacyNotTonight-${role}`)?.value || '',
+    note: document.getElementById(`intimacyNote-${role}`)?.value || '',
+  });
+  showToast('Intimate table card saved.');
+  refreshView();
+}
+
 function toggleHistory() {
   showHistory = !showHistory;
   refreshView();
+}
+
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+function getSceneEntryKey(sessionId, sceneId) {
+  return `vg_scene_entered_${sessionId}_${sceneId}`;
+}
+
+function hasEnteredScene(session, scene) {
+  return !!localStorage.getItem(getSceneEntryKey(session.id, scene.id));
+}
+
+function enterScene(sessionId, sceneId) {
+  if (activeSafetySignal?.tier === 'hold') {
+    showToast('Hold is active. Resume the page before entering.');
+    return;
+  }
+  localStorage.setItem(getSceneEntryKey(sessionId, sceneId), '1');
+  refreshView();
+}
+
+function signalEmber() {
+  window.open('/pause.html#ember', '_blank', 'noopener');
+}
+
+// ── Protagonist ward-ack sign-off ──────────────────────────────
+// Shown once per campaign before the first Warded Entry. The DM has
+// already acked the hard-gated wards at campaign creation; this is the
+// player's chance to uncheck any they don't personally consent to.
+function renderProtagonistSignoff(campaign, signalBanner) {
+  const dmAcked = Array.isArray(campaign.ackedWards) ? campaign.ackedWards : [];
+  if (!dmAcked.length) {
+    // Nothing gated in this campaign — auto-sign off so play can begin.
+    VGEngine.setProtagonistAcks(campaign.id, []);
+    setTimeout(refreshView, 0);
+    return `<div class="no-session"><p>Preparing ward stack…</p></div>`;
+  }
+  const rows = dmAcked.map(w => `
+    <label style="display:flex;align-items:center;gap:10px;padding:8px 0;cursor:pointer;">
+      <input type="checkbox" class="vg-protag-ack" value="${escapeHtml(w)}" checked>
+      <span class="ward-pill">${escapeHtml(w)}</span>
+    </label>
+  `).join('');
+  return `
+    ${signalBanner}
+    <div class="ward-entry">
+      <div class="ward-entry-title">✦ Protagonist Sign-Off ✦</div>
+      <div style="color:var(--text-dim);line-height:1.8;">
+        Your DM has acknowledged the following hard-gated wards for this campaign.
+        Leave checked what you consent to encounter in play. Uncheck anything you'd rather not — any scene carrying a declined ward will be held closed and surfaced to the DM as an Ember signal.
+      </div>
+      <div style="margin:16px 0 8px 0;">${rows}</div>
+      <div class="ward-entry-actions">
+        <button class="btn btn-purple" onclick="submitProtagonistSignoff('${campaign.id}')">✦ Sign off — begin play</button>
+        <button class="btn btn-ghost" onclick="signalEmber()">🕯️ Pause — talk to DM first</button>
+      </div>
+    </div>
+  `;
+}
+
+function submitProtagonistSignoff(campaignId) {
+  const boxes = document.querySelectorAll('.vg-protag-ack');
+  const acked = Array.from(boxes).filter(b => b.checked).map(b => b.value);
+  VGEngine.setProtagonistAcks(campaignId, acked);
+  showToast(acked.length
+    ? `Signed off on ${acked.length} ward${acked.length===1?'':'s'}.`
+    : 'Signed off with all wards declined — scenes with gated wards will be held.');
+  refreshView();
+}
+
+function openResignModal() {
+  const session = VGEngine.resumeSession();
+  const campaign = VGEngine.getState().campaign;
+  if (!campaign) return;
+  if (!confirm('Revisit the ward sign-off? This will re-open the sign-off screen.')) return;
+  // Null it out so the render() branch shows the sign-off card again.
+  VGEngine.setProtagonistAcks(campaign.id, []);
+  // setProtagonistAcks stores [] — but for re-opening we want null.
+  // Use saveCampaign via an engine-aware escape hatch:
+  const fresh = VGEngine.getCampaign ? VGEngine.getCampaign(campaign.id) : null;
+  if (fresh) {
+    fresh.protagonistAckedWards = null;
+    VGEngine.saveCampaign(fresh);
+  }
+  refreshView();
+}
+
+function renderSignalBanner() {
+  if (!activeSafetySignal || !['hold','dim','veil','stoke','rewrite','resume'].includes(activeSafetySignal.tier)) return '';
+  const tone = {
+    hold: { title: '🟠 Hold active', body: 'The page is paused. Sit with the scene, breathe, and wait for the resume signal.' },
+    dim: { title: '🟡 Dim signaled', body: 'Ease the current beat. Softer is the instruction.' },
+    veil: { title: '🌫️ Veil signaled', body: 'Turn the camera away. Keep the scene impressionistic from here.' },
+    stoke: { title: '🔥 Stoke signaled', body: 'Affirmative signal received. Stay inside the scene’s authored bounds.' },
+    rewrite: { title: '✍️ Rewrite received', body: 'The last beat was taken back. Refreshing the page will show the rewound scene state.' },
+    resume: { title: '✅ Page resumed', body: 'The hold is cleared. Proceed gently.' },
+  }[activeSafetySignal.tier];
+  return `<div class="signal-banner">
+    <div class="signal-banner-title">${tone.title}</div>
+    <div style="color:var(--text-dim);line-height:1.8;">${tone.body}</div>
+  </div>`;
+}
+
+function onSharedStateChange(e) {
+  if (['vg_signals','vg_session','vg_intimacy_chat','vg_intimacy_state','vg_intimacy_cards'].includes(e.key)) refreshView();
+}
+
+function pollSafetyRuntime() {
+  const latest = VGEngine.getLatestSignal ? VGEngine.getLatestSignal() : null;
+  activeSafetySignal = latest || null;
+  if (latest?.at && latest.at !== lastProcessedSignalAt) {
+    handleSafetySignal(latest);
+    lastProcessedSignalAt = latest.at;
+    sessionStorage.setItem('vg_player_last_signal_at', latest.at);
+  }
+}
+
+function handleSafetySignal(signal) {
+  if (!signal) return;
+  if (signal.tier === 'snuff') {
+    window.location.href = '/pause.html#hearth';
+    return;
+  }
+  if (signal.tier === 'rewrite') {
+    const session = VGEngine.resumeSession();
+    const scene = VGEngine.getCurrentScene();
+    if (session?.id && scene?.id) {
+      localStorage.removeItem(getSceneEntryKey(session.id, scene.id));
+    }
+    showToast('Rewrite received — the last beat was taken back.');
+    return;
+  }
+  const labels = {
+    hold: 'Hold received — pausing the page.',
+    resume: 'Resume received — the page can move again.',
+    dim: 'Dim received — ease the beat.',
+    veil: 'Veil received — turn the camera away.',
+    stoke: 'Stoke received — affirmative signal logged.',
+  };
+  if (labels[signal.tier]) showToast(labels[signal.tier]);
 }
 
 let toastTimeout;
@@ -397,5 +1021,23 @@ function showToast(msg) {
 
 init();
 </script>
+
+<!-- ── The Warden's Compact — pause / ember / hearth ───────── -->
+<a href="/pause.html" target="_blank" rel="noopener"
+   aria-label="Open the Warden's Compact — pause, signal the Ember, reach the Hearth"
+   title="The Warden's Compact — pause / ember / hearth"
+   style="position:fixed;top:14px;right:14px;z-index:9999;
+          display:inline-flex;align-items:center;gap:8px;
+          padding:8px 14px;
+          background:rgba(20,12,10,0.85);
+          border:1px solid rgba(201,169,97,0.55);
+          border-radius:20px;
+          color:#e8c87a;
+          font-family:'Cinzel',serif;font-size:11px;letter-spacing:0.14em;
+          text-decoration:none;text-transform:uppercase;
+          box-shadow:0 0 14px rgba(201,169,97,0.18);
+          -webkit-backdrop-filter:blur(4px);backdrop-filter:blur(4px);">
+  <span aria-hidden="true">🕯️</span><span>Pause</span>
+</a>
 </body>
 </html>

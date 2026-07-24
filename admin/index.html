@@ -4,6 +4,16 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Velvet Grimoire — DM Admin</title>
+<!-- ── Role guard: redirect non-DMs back to landing ───────────── -->
+<script>
+(function () {
+  var role = localStorage.getItem('vg_role');
+  if (role !== 'dm') {
+    // No role set, or set to player. Bounce to landing so they can pick.
+    location.replace('/?reason=dm-only');
+  }
+})();
+</script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@400;600;700&family=Crimson+Pro:ital,wght@0,300;0,400;0,600;1,300;1,400&display=swap" rel="stylesheet">
 <style>
@@ -22,6 +32,7 @@
   --text-muted: #4a3a2a;
   --fight: #cc3322;
   --flight: #2266bb;
+  --fawn: #7a3a8a;
   --freeze: #aa8800;
 }
 * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -138,13 +149,89 @@ select option { background: var(--surface); }
 }
 .tag.removable { cursor: pointer; }
 .tag.removable:hover { border-color: var(--red-bright); color: #ff8080; background: rgba(200,0,0,0.1); }
-.tag-fight { border-color: rgba(204,51,34,0.4); color: #ff8070; background: rgba(204,51,34,0.1); }
-.tag-flight { border-color: rgba(34,102,187,0.4); color: #80a8ff; background: rgba(34,102,187,0.1); }
-.tag-freeze { border-color: rgba(170,136,0,0.4); color: #ffcc50; background: rgba(170,136,0,0.1); }
+.tag-fight  { border-color: rgba(204,51,34,0.4);   color: #ff8070; background: rgba(204,51,34,0.1); }
+.tag-flight { border-color: rgba(34,102,187,0.4);  color: #80a8ff; background: rgba(34,102,187,0.1); }
+.tag-fawn   { border-color: rgba(122,58,138,0.4);  color: #c090e0; background: rgba(122,58,138,0.1); }
+.tag-freeze { border-color: rgba(170,136,0,0.4);   color: #ffcc50; background: rgba(170,136,0,0.1); }
 
 .tag-input-row { display: flex; gap: 8px; margin-top: 8px; }
 .tag-input-row input { flex: 1; }
 .tags-display { margin-top: 8px; min-height: 32px; }
+
+/* Wards (TAGS.md §I–IV) */
+.ward-radio {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 5px 12px; border-radius: 16px; cursor: pointer;
+  border: 1px solid rgba(200,160,96,0.2);
+  background: rgba(200,160,96,0.04);
+  color: var(--text-dim); font-size: 12px;
+  transition: all 0.15s;
+}
+.ward-radio:hover { border-color: rgba(200,160,96,0.5); color: var(--text); }
+.ward-radio input { accent-color: var(--gold); margin: 0; }
+.ward-radio:has(input:checked) {
+  border-color: var(--gold); color: var(--gold);
+  background: rgba(200,160,96,0.14);
+  box-shadow: 0 0 0 1px rgba(200,160,96,0.3);
+}
+.ward-group {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 12px;
+  background: rgba(255,255,255,0.015);
+}
+.ward-group-title {
+  font-family: 'Cinzel', serif; font-size: 10px; letter-spacing: 2px;
+  color: var(--gold-dim); text-transform: uppercase; margin-bottom: 8px;
+}
+.ward-chip {
+  display: inline-flex; align-items: center; gap: 4px;
+  padding: 4px 10px; margin: 3px; border-radius: 14px;
+  border: 1px solid rgba(200,160,96,0.25);
+  background: rgba(200,160,96,0.05);
+  color: var(--text-dim); font-size: 11px; cursor: pointer;
+  transition: all 0.15s;
+  user-select: none;
+}
+.ward-chip:hover { border-color: rgba(200,160,96,0.55); color: var(--text); }
+.ward-chip.active {
+  border-color: var(--gold); color: var(--gold);
+  background: rgba(200,160,96,0.16);
+}
+.ward-chip.gated { border-style: dashed; }
+.ward-chip.gated.active {
+  border-color: #ff9a60; color: #ffb080; background: rgba(200,80,0,0.14);
+}
+.ward-chip .lock { font-size: 9px; opacity: 0.75; }
+
+/* Antagonist rows */
+.antag-row {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 10px 12px;
+  margin-bottom: 8px;
+  background: rgba(255,255,255,0.015);
+  position: relative;
+}
+.antag-row .antag-head {
+  display: flex; align-items: center; justify-content: space-between;
+  margin-bottom: 6px;
+}
+.antag-row .antag-num {
+  font-family: 'Cinzel', serif; font-size: 10px; letter-spacing: 2px;
+  color: var(--gold-dim); text-transform: uppercase;
+}
+.antag-row .antag-remove {
+  background: none; border: none; cursor: pointer;
+  color: var(--text-muted); font-size: 14px;
+  padding: 0 4px;
+}
+.antag-row .antag-remove:hover { color: #ff8080; }
+.antag-row input, .antag-row textarea {
+  font-size: 13px;
+  margin-bottom: 6px;
+}
+.antag-row label { font-size: 10px; margin-bottom: 2px; }
 
 /* Branch editor */
 .branch-tabs { display: flex; gap: 0; margin-bottom: 0; border-bottom: 1px solid var(--border); }
@@ -158,6 +245,8 @@ select option { background: var(--surface); }
 .branch-tab.fight.active { border-color: var(--fight); }
 .branch-tab.flight { color: #80a8ff; }
 .branch-tab.flight.active { border-color: var(--flight); }
+.branch-tab.fawn { color: #c090e0; }
+.branch-tab.fawn.active { border-color: var(--fawn); }
 .branch-tab.freeze { color: #ffcc50; }
 .branch-tab.freeze.active { border-color: var(--freeze); }
 .branch-content { display: none; padding: 20px 0; }
@@ -191,8 +280,9 @@ select option { background: var(--surface); }
 /* DC Sliders */
 .dc-row { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; }
 .dc-label { width: 80px; font-size: 13px; }
-.dc-label.fight { color: #ff8070; }
+.dc-label.fight  { color: #ff8070; }
 .dc-label.flight { color: #80a8ff; }
+.dc-label.fawn   { color: #c090e0; }
 .dc-label.freeze { color: #ffcc50; }
 input[type=range] { flex: 1; accent-color: var(--gold); }
 .dc-val { width: 30px; text-align: right; font-family: 'Cinzel', serif; color: var(--gold); }
@@ -208,8 +298,9 @@ input[type=range] { flex: 1; accent-color: var(--gold); }
   margin-bottom: 8px; background: var(--surface2); border-radius: 0 4px 4px 0;
   font-size: 14px;
 }
-.history-entry.fight { border-color: var(--fight); }
+.history-entry.fight  { border-color: var(--fight); }
 .history-entry.flight { border-color: var(--flight); }
+.history-entry.fawn   { border-color: var(--fawn); }
 .history-entry.freeze { border-color: var(--freeze); }
 
 /* Scene tree viz */
@@ -259,6 +350,7 @@ input[type=range] { flex: 1; accent-color: var(--gold); }
 .toast.show { opacity: 1; transform: translateY(0); }
 .toast.success { border-color: rgba(68,204,68,0.5); color: #88ff88; }
 .toast.error { border-color: rgba(200,68,68,0.5); color: #ff8888; }
+.toast.warn { border-color: rgba(255,180,80,0.55); color: #ffc070; }
 
 /* Scrollbar */
 ::-webkit-scrollbar { width: 6px; }
@@ -273,7 +365,39 @@ input[type=range] { flex: 1; accent-color: var(--gold); }
 .flex-end { justify-content: flex-end; }
 .flex-between { justify-content: space-between; }
 .align-center { align-items: center; }
+.guide-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; margin-bottom: 18px; }
+.guide-card { background: var(--surface); border: 1px solid var(--border); border-radius: 6px; padding: 16px; min-height: 150px; }
+.guide-card strong { display: block; font-family: 'Cinzel', serif; color: var(--gold); font-size: 13px; letter-spacing: 1px; margin-bottom: 8px; }
+.guide-card p { color: var(--text-dim); font-size: 14px; line-height: 1.55; }
+.step-list { counter-reset: step; display: grid; gap: 10px; margin-top: 12px; }
+.step-item { counter-increment: step; display: grid; grid-template-columns: 34px 1fr; gap: 10px; align-items: start; background: rgba(255,255,255,0.025); border: 1px solid var(--border); border-radius: 6px; padding: 12px; }
+.step-item::before { content: counter(step); width: 24px; height: 24px; border-radius: 50%; display: grid; place-items: center; background: rgba(200,160,96,0.14); color: var(--gold); font-family: 'Cinzel', serif; font-size: 12px; }
+.step-item b { display:block; color: var(--text); font-size: 15px; margin-bottom: 2px; }
+.step-item span { display:block; color: var(--text-dim); font-size: 13px; line-height: 1.45; }
+.demo-banner { background: linear-gradient(135deg, rgba(122,58,138,0.18), rgba(200,160,96,0.1)); border: 1px solid rgba(200,160,96,0.28); border-radius: 6px; padding: 18px 20px; margin-bottom: 18px; }
+.demo-banner h3 { font-family:'Cinzel',serif; color: var(--gold); font-size: 16px; letter-spacing: 1px; margin-bottom: 6px; }
+.demo-banner p { color: var(--text-dim); font-size: 14px; line-height: 1.6; margin-bottom: 14px; }
+.intimacy-card { border-color: rgba(122,58,138,0.32); background: linear-gradient(135deg, rgba(122,58,138,0.12), rgba(0,0,0,0.22)); }
+.intimacy-toolbar { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-bottom: 14px; }
+.heat-track { height: 10px; border-radius: 999px; background: rgba(255,255,255,0.06); overflow: hidden; border: 1px solid var(--border); }
+.heat-fill { height: 100%; background: linear-gradient(90deg, #604080, #c8a060, #dd4422); }
+.chat-log { max-height: 260px; overflow-y: auto; display: grid; gap: 8px; padding: 10px; background: rgba(0,0,0,0.22); border: 1px solid var(--border); border-radius: 6px; margin-bottom: 12px; }
+.chat-msg { border-left: 3px solid var(--gold-dim); padding: 8px 10px; background: rgba(255,255,255,0.025); border-radius: 4px; }
+.chat-msg.player { border-left-color: #9060c0; }
+.chat-msg.dm { border-left-color: var(--gold); }
+.chat-meta { display: flex; justify-content: space-between; gap: 10px; color: var(--text-muted); font-size: 11px; letter-spacing: 1px; text-transform: uppercase; margin-bottom: 4px; }
+.prompt-row, .want-grid { display: flex; flex-wrap: wrap; gap: 6px; }
+.prompt-chip, .want-chip { border: 1px solid var(--border); background: rgba(255,255,255,0.035); color: var(--text-dim); border-radius: 18px; padding: 6px 10px; font-size: 12px; cursor: pointer; }
+.prompt-chip:hover, .want-chip:hover { border-color: var(--border-hot); color: var(--text); }
+.want-chip input { width: auto; margin-right: 5px; }
+.compat-line { font-size: 13px; color: var(--text-dim); line-height: 1.6; margin: 8px 0 14px; }
+.intimacy-chat-row { display: grid; grid-template-columns: 150px 1fr auto; gap: 8px; align-items: start; }
+.locked { opacity: 0.5; pointer-events: none; }
 hr.divider { border: none; border-top: 1px solid var(--border); margin: 24px 0; }
+@media (max-width: 980px) {
+  .guide-grid { grid-template-columns: 1fr; }
+  .intimacy-toolbar, .intimacy-chat-row { grid-template-columns: 1fr; }
+}
 </style>
 </head>
 <body>
@@ -286,8 +410,15 @@ hr.divider { border: none; border-top: 1px solid var(--border); margin: 24px 0; 
   </div>
 
   <div class="sidebar-section">
+    <div class="sidebar-section-label">Start Here</div>
+    <button class="sidebar-btn active" onclick="showPanel('guide')" id="nav-guide">
+      <span class="icon">✦</span> First Run
+    </button>
+  </div>
+
+  <div class="sidebar-section">
     <div class="sidebar-section-label">Campaign</div>
-    <button class="sidebar-btn active" onclick="showPanel('campaigns')" id="nav-campaigns">
+    <button class="sidebar-btn" onclick="showPanel('campaigns')" id="nav-campaigns">
       <span class="icon">📜</span> Campaigns
     </button>
     <button class="sidebar-btn" onclick="showPanel('scenes')" id="nav-scenes">
@@ -323,16 +454,16 @@ hr.divider { border: none; border-top: 1px solid var(--border); margin: 24px 0; 
 
   <div style="margin-top:auto; padding:16px 20px; border-top:1px solid var(--border);">
     <div style="display:flex;flex-direction:column;gap:6px;">
-      <a href="https://vg.highfunctioningchaos.living/player/player.html" target="_blank" class="btn btn-gold" style="width:100%;justify-content:center;font-size:10px;">
+      <a href="/player/player.html" target="_blank" class="btn btn-gold" style="width:100%;justify-content:center;font-size:10px;">
         🎮 Player View
       </a>
-      <a href="https://vg.highfunctioningchaos.living/map/dm-map.html" target="_blank" class="btn btn-ghost" style="width:100%;justify-content:center;font-size:10px;">
+      <a href="/map/dm-map.html" target="_blank" class="btn btn-ghost" style="width:100%;justify-content:center;font-size:10px;">
         🗺 Map Editor
       </a>
-      <a href="https://vg.highfunctioningchaos.living/map/player-map.html" target="_blank" class="btn btn-ghost" style="width:100%;justify-content:center;font-size:10px;">
+      <a href="/map/player-map.html" target="_blank" class="btn btn-ghost" style="width:100%;justify-content:center;font-size:10px;">
         🧭 Player Map
       </a>
-      <a href="https://vg.highfunctioningchaos.living/" target="_blank" class="btn btn-ghost" style="width:100%;justify-content:center;font-size:10px;">
+      <a href="/" target="_blank" class="btn btn-ghost" style="width:100%;justify-content:center;font-size:10px;">
         ⌂ Home
       </a>
     </div>
@@ -342,8 +473,53 @@ hr.divider { border: none; border-top: 1px solid var(--border); margin: 24px 0; 
 <!-- Main -->
 <main class="main">
 
+  <!-- GUIDE -->
+  <div class="panel active" id="panel-guide">
+    <h2 class="page-title">First Run</h2>
+    <p class="page-sub">Load the demo, learn the loop, then replace the sample material with your own campaign.</p>
+
+    <div class="demo-banner">
+      <h3>The Crimson Veil Demo</h3>
+      <p>
+        Installs a complete starter campaign with 11 linked scenes, four branch paths, ward tags,
+        six scene templates, a playable manor map, and sample Threshold/Hearth records for screenshots.
+      </p>
+      <div class="flex gap-8" style="flex-wrap:wrap;">
+        <button class="btn btn-primary" onclick="installDemoContent()">✦ Load Demo Campaign</button>
+        <button class="btn btn-ghost" onclick="installDemoContent(true)">📷 Load Screenshot Mode</button>
+        <button class="btn btn-ghost" onclick="window.open('/DEMO-WALKTHROUGH.md','_blank')">Read Walkthrough</button>
+      </div>
+    </div>
+
+    <div class="guide-grid">
+      <div class="guide-card">
+        <strong>What the demo proves</strong>
+        <p>A buyer can see campaign setup, ward enforcement, the player-facing scene gate, the map, dice, and Hearth closure without writing anything first.</p>
+      </div>
+      <div class="guide-card">
+        <strong>What to customize</strong>
+        <p>Replace names, ward choices, Banished Names, scene text, map events, and screenshots before using it for a private table.</p>
+      </div>
+      <div class="guide-card">
+        <strong>What to package</strong>
+        <p>Ship this folder with the root README, roadmap, demo walkthrough, Compact docs, and every file under engine, demo, dice, map, player, and admin.</p>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-title">Guided First Session</div>
+      <div class="step-list">
+        <div class="step-item"><div><b>Load or create a campaign</b><span>Use the demo first, or create your own campaign from the Campaigns panel.</span></div></div>
+        <div class="step-item"><div><b>Set the Compact</b><span>Review hard-gated wards, Banished Names, Hallowed Ground, and Veiled Ground before scene authoring.</span></div></div>
+        <div class="step-item"><div><b>Seal the Threshold</b><span>Open the Pause surface and save tonight's check-in before starting the session.</span></div></div>
+        <div class="step-item"><div><b>Open the table</b><span>Start the campaign, open Player View, and use the map or dice panels as needed.</span></div></div>
+        <div class="step-item"><div><b>Close with Hearth</b><span>After the last scene, route to the Hearth and seal the session cleanly.</span></div></div>
+      </div>
+    </div>
+  </div>
+
   <!-- CAMPAIGNS -->
-  <div class="panel active" id="panel-campaigns">
+  <div class="panel" id="panel-campaigns">
     <h2 class="page-title">Campaigns</h2>
     <p class="page-sub">Create and manage your campaign worlds.</p>
     <div class="flex gap-8 mt-16" style="margin-bottom:24px;">
@@ -499,18 +675,42 @@ hr.divider { border: none; border-top: 1px solid var(--border); margin: 24px 0; 
     <p class="page-sub">Global configuration for the Grimoire engine.</p>
     <div class="card">
       <div class="card-title">Data Management</div>
+      <p style="font-size:14px;color:var(--text-dim);line-height:1.7;margin-top:8px;">
+        Backups include campaigns, templates, maps, active sessions, Thresholds, Ember signals, and Hearth seals.
+      </p>
       <div class="flex gap-8 mt-16">
-        <button class="btn btn-ghost" onclick="exportAllData()">⬇ Export All Data</button>
+        <button class="btn btn-ghost" onclick="exportAllData()">⬇ Backup Everything</button>
+        <button class="btn btn-ghost" onclick="triggerImport()">⬆ Restore / Import JSON</button>
+        <button class="btn btn-primary" onclick="installDemoContent()">✦ Reload Demo</button>
         <button class="btn btn-danger" onclick="confirmNukeData()">💀 Wipe All Data</button>
       </div>
+    </div>
+    <div class="card">
+      <div class="card-title">Remote Multiplayer</div>
+      <p style="font-size:14px;color:var(--text-dim);line-height:1.7;margin-top:8px;">
+        Create a table code on the VPS backend, then share that code with the player. Sync includes scenes, maps, Compact records, and Intimate Table messages.
+      </p>
+      <label>Backend URL</label>
+      <input type="url" id="syncApiBase" placeholder="Same site, e.g. https://velvetgrimore.xyz">
+      <label>Table Code</label>
+      <div class="flex gap-8">
+        <input type="text" id="syncTableCode" placeholder="ABC123" style="text-transform:uppercase;">
+        <button class="btn btn-gold" onclick="createRemoteTable()" style="white-space:nowrap;">Create</button>
+        <button class="btn btn-ghost" onclick="joinRemoteTable()" style="white-space:nowrap;">Join</button>
+      </div>
+      <div class="flex gap-8 mt-16" style="flex-wrap:wrap;">
+        <button class="btn btn-ghost btn-sm" onclick="syncNow()">Sync Now</button>
+        <button class="btn btn-ghost btn-sm" onclick="stopSync()">Stop Sync</button>
+      </div>
+      <div id="syncStatus" style="font-size:13px;color:var(--text-dim);line-height:1.7;margin-top:12px;">Remote sync is off.</div>
     </div>
     <div class="card">
       <div class="card-title">About</div>
       <p style="font-size:14px;color:var(--text-dim);line-height:1.8;margin-top:8px;">
         Velvet Grimoire Campaign Engine v1.0<br>
-        Self-hosted • No AI required • No data leaves your server<br>
-        DM Admin Panel — <a href="https://vg.highfunctioningchaos.living/player/player.html" target="_blank" style="color:var(--gold);">Open Player View →</a><br>
-        <a href="https://vg.highfunctioningchaos.living/map/dm-map.html" target="_blank" style="color:var(--gold-dim);">Open Map Editor →</a>
+        Self-hosted • No AI required • Browser-local by default; Discord sends data only when configured<br>
+        DM Admin Panel — <a href="/player/player.html" target="_blank" style="color:var(--gold);">Open Player View →</a><br>
+        <a href="/map/dm-map.html" target="_blank" style="color:var(--gold-dim);">Open Map Editor →</a>
       </p>
     </div>
   </div>
@@ -557,13 +757,54 @@ hr.divider { border: none; border-top: 1px solid var(--border); margin: 24px 0; 
     <textarea id="protNotes" rows="2" placeholder="Background, hard limits, player preferences..."></textarea>
 
     <hr class="divider">
-    <div style="font-family:'Cinzel',serif;font-size:11px;letter-spacing:3px;color:var(--gold-dim);margin-bottom:16px;">KEY NPC</div>
-    <div class="grid-2">
-      <div><label>Name</label><input type="text" id="npcName" placeholder="Lord Aldric Voss"></div>
-      <div><label>Role</label><input type="text" id="npcRole" placeholder="Antagonist / Love Interest"></div>
+    <div class="flex" style="align-items:baseline;justify-content:space-between;margin-bottom:8px;">
+      <div style="font-family:'Cinzel',serif;font-size:11px;letter-spacing:3px;color:var(--gold-dim);">ANTAGONISTS <span id="antagCount" style="color:var(--text-muted);font-family:'Crimson Pro',serif;font-size:11px;letter-spacing:0.5px;">(0/5)</span></div>
+      <button type="button" class="btn btn-ghost btn-sm" id="antagAddBtn" onclick="addAntagonist()">+ Add Antagonist</button>
     </div>
-    <label>Personality & Agenda</label>
-    <textarea id="npcPersonality" rows="2" placeholder="Cold and calculating. Wants to own the city — and her."></textarea>
+    <div style="font-size:11px;color:var(--text-muted);font-style:italic;margin-bottom:10px;">
+      Up to five antagonists per campaign, all controlled by the Warden for now. Each will be selectable from the scene editor in a future pass.
+    </div>
+    <div id="antagList"></div>
+
+    <hr class="divider">
+    <div style="font-family:'Cinzel',serif;font-size:11px;letter-spacing:3px;color:var(--gold);margin-bottom:4px;">🔒 WARD ACKS</div>
+    <div style="font-size:11px;color:var(--text-muted);font-style:italic;margin-bottom:10px;">
+      Per TAGS.md §II — these element wards are hard-gated. Tick only those the protagonist has explicitly consented to appear in scenes. Any scene using an unacked ward is refused at save time. You can revise this later by editing the campaign.
+    </div>
+    <div id="campAckedWardGrid" style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:8px;"></div>
+
+    <hr class="divider">
+    <div style="font-family:'Cinzel',serif;font-size:11px;letter-spacing:3px;color:var(--gold);margin-bottom:4px;">⛔ BANISHED NAMES</div>
+    <div style="font-size:11px;color:var(--text-muted);font-style:italic;margin-bottom:8px;">
+      Protagonist-level hard limits. Any scene carrying one of these wards is refused at save time.
+    </div>
+    <div class="tag-input-row">
+      <input type="text" id="protBanishedInput" placeholder="Add banished ward..." onkeydown="if(event.key==='Enter'){addBanishedName();}">
+      <button class="btn btn-ghost btn-sm" onclick="addBanishedName()">+ Add</button>
+    </div>
+    <div class="tags-display" id="protBanishedDisplay"></div>
+
+    <hr class="divider">
+    <div style="font-family:'Cinzel',serif;font-size:11px;letter-spacing:3px;color:var(--gold);margin-bottom:4px;">✦ HALLOWED GROUND</div>
+    <div style="font-size:11px;color:var(--text-muted);font-style:italic;margin-bottom:8px;">
+      Content that may exist in lore but never appears on page. The default floor is always preserved.
+    </div>
+    <div class="tag-input-row">
+      <input type="text" id="campHallowedInput" placeholder="Add hallowed tag..." onkeydown="if(event.key==='Enter'){addHallowedTag();}">
+      <button class="btn btn-ghost btn-sm" onclick="addHallowedTag()">+ Add</button>
+    </div>
+    <div class="tags-display" id="campHallowedDisplay"></div>
+
+    <hr class="divider">
+    <div style="font-family:'Cinzel',serif;font-size:11px;letter-spacing:3px;color:var(--gold);margin-bottom:4px;">🌫 VEILED GROUND</div>
+    <div style="font-size:11px;color:var(--text-muted);font-style:italic;margin-bottom:8px;">
+      Content that can appear only impressionistically. Matching scenes are forced to suggested intensity.
+    </div>
+    <div class="tag-input-row">
+      <input type="text" id="campVeiledInput" placeholder="Add veiled tag..." onkeydown="if(event.key==='Enter'){addVeiledTag();}">
+      <button class="btn btn-ghost btn-sm" onclick="addVeiledTag()">+ Add</button>
+    </div>
+    <div class="tags-display" id="campVeiledDisplay"></div>
 
     <hr class="divider">
     <div style="font-family:'Cinzel',serif;font-size:11px;letter-spacing:3px;color:var(--gold-dim);margin-bottom:8px;">CAMPAIGN TAGS</div>
@@ -647,9 +888,9 @@ hr.divider { border: none; border-top: 1px solid var(--border); margin: 24px 0; 
     <hr class="divider">
     <div style="font-family:'Cinzel',serif;font-size:11px;letter-spacing:3px;color:var(--gold-dim);margin-bottom:16px;">DC THRESHOLDS (d20 roll needed)</div>
     <div class="dc-row">
-      <span class="dc-label freeze">Freeze</span>
-      <input type="range" min="1" max="20" value="5" id="dcFreeze" oninput="document.getElementById('dcFreezeVal').textContent=this.value">
-      <span class="dc-val" id="dcFreezeVal">5</span>
+      <span class="dc-label fight">Fight</span>
+      <input type="range" min="1" max="20" value="14" id="dcFight" oninput="document.getElementById('dcFightVal').textContent=this.value">
+      <span class="dc-val" id="dcFightVal">14</span>
     </div>
     <div class="dc-row">
       <span class="dc-label flight">Flight</span>
@@ -657,9 +898,14 @@ hr.divider { border: none; border-top: 1px solid var(--border); margin: 24px 0; 
       <span class="dc-val" id="dcFlightVal">8</span>
     </div>
     <div class="dc-row">
-      <span class="dc-label fight">Fight</span>
-      <input type="range" min="1" max="20" value="14" id="dcFight" oninput="document.getElementById('dcFightVal').textContent=this.value">
-      <span class="dc-val" id="dcFightVal">14</span>
+      <span class="dc-label fawn">Fawn</span>
+      <input type="range" min="1" max="20" value="4" id="dcFawn" oninput="document.getElementById('dcFawnVal').textContent=this.value">
+      <span class="dc-val" id="dcFawnVal">4</span>
+    </div>
+    <div class="dc-row">
+      <span class="dc-label freeze">Freeze</span>
+      <input type="range" min="1" max="20" value="5" id="dcFreeze" oninput="document.getElementById('dcFreezeVal').textContent=this.value">
+      <span class="dc-val" id="dcFreezeVal">5</span>
     </div>
 
     <hr class="divider">
@@ -667,6 +913,7 @@ hr.divider { border: none; border-top: 1px solid var(--border); margin: 24px 0; 
     <div class="branch-tabs">
       <button class="branch-tab fight active" onclick="switchBranch('fight')">⚔ Fight</button>
       <button class="branch-tab flight" onclick="switchBranch('flight')">🏃 Flight</button>
+      <button class="branch-tab fawn" onclick="switchBranch('fawn')">🕊 Fawn</button>
       <button class="branch-tab freeze" onclick="switchBranch('freeze')">🧊 Freeze</button>
     </div>
 
@@ -680,6 +927,11 @@ hr.divider { border: none; border-top: 1px solid var(--border); margin: 24px 0; 
       <label>Branch Narrative</label><textarea id="flightNarrative" rows="4" placeholder="What happens when the protagonist withdraws or escapes..."></textarea>
       <label>Next Scene</label><select id="flightNext"><option value="">— End / TBD —</option></select>
     </div>
+    <div class="branch-content" id="branch-fawn">
+      <label>Button Label</label><input type="text" id="fawnLabel" placeholder="Appease & Yield">
+      <label>Branch Narrative</label><textarea id="fawnNarrative" rows="4" placeholder="What happens when the protagonist appeases, placates, or yields to the threat..."></textarea>
+      <label>Next Scene</label><select id="fawnNext"><option value="">— End / TBD —</option></select>
+    </div>
     <div class="branch-content" id="branch-freeze">
       <label>Button Label</label><input type="text" id="freezeLabel" placeholder="Hold Position">
       <label>Branch Narrative</label><textarea id="freezeNarrative" rows="4" placeholder="What happens when the protagonist waits and observes..."></textarea>
@@ -687,7 +939,45 @@ hr.divider { border: none; border-top: 1px solid var(--border); margin: 24px 0; 
     </div>
 
     <hr class="divider">
-    <div style="font-family:'Cinzel',serif;font-size:11px;letter-spacing:3px;color:var(--gold-dim);margin-bottom:8px;">SCENE TAGS</div>
+
+    <!-- ── WARDS (TAGS.md §I–IV) ────────────────────────────── -->
+    <div style="font-family:'Cinzel',serif;font-size:11px;letter-spacing:3px;color:var(--gold);margin-bottom:4px;">✦ WARDS</div>
+    <div style="font-size:11px;color:var(--text-muted);font-style:italic;margin-bottom:12px;">
+      Every scene carries wards: *what* is present (elements), *how present* (intensity), *how framed* in fiction (frame).
+    </div>
+
+    <!-- Intensity ward -->
+    <div style="margin-bottom:14px;">
+      <div style="font-size:10px;letter-spacing:2px;color:var(--gold-dim);text-transform:uppercase;margin-bottom:6px;">Intensity ward — narration register</div>
+      <div class="flex gap-8" id="intensityWardRow" style="flex-wrap:wrap;">
+        <label class="ward-radio"><input type="radio" name="intensityWard" value="suggested"> <span>Suggested</span></label>
+        <label class="ward-radio"><input type="radio" name="intensityWard" value="explicit"> <span>Explicit</span></label>
+        <label class="ward-radio"><input type="radio" name="intensityWard" value="visceral"> <span>Visceral</span></label>
+      </div>
+    </div>
+
+    <!-- Frame ward -->
+    <div style="margin-bottom:14px;">
+      <div style="font-size:10px;letter-spacing:2px;color:var(--gold-dim);text-transform:uppercase;margin-bottom:6px;">Frame ward — how the fiction frames it</div>
+      <div class="flex gap-8" id="frameWardRow" style="flex-wrap:wrap;">
+        <label class="ward-radio"><input type="radio" name="frameWard" value="consensual-if"> <span>Consensual-if</span></label>
+        <label class="ward-radio"><input type="radio" name="frameWard" value="dubcon-if"> <span>Dubcon-if <em style="color:var(--text-muted);font-size:10px;">(requires dubcon-roleplay)</em></span></label>
+        <label class="ward-radio"><input type="radio" name="frameWard" value="noncon-if"> <span>Noncon-if <em style="color:var(--text-muted);font-size:10px;">(requires noncon-roleplay)</em></span></label>
+      </div>
+    </div>
+
+    <!-- Element wards -->
+    <div style="margin-bottom:10px;">
+      <div style="font-size:10px;letter-spacing:2px;color:var(--gold-dim);text-transform:uppercase;margin-bottom:6px;">Element wards — what is present</div>
+      <div id="elementWardGrid" style="display:flex;flex-direction:column;gap:10px;margin-bottom:10px;"></div>
+      <div style="font-size:11px;color:var(--text-muted);margin-top:6px;">
+        🔒 hard-gated wards require an explicit ack from the protagonist owner at campaign setup — per TAGS.md §II.
+      </div>
+    </div>
+
+    <hr class="divider">
+    <div style="font-family:'Cinzel',serif;font-size:11px;letter-spacing:3px;color:var(--gold-dim);margin-bottom:4px;">SCENE TAGS</div>
+    <div style="font-size:11px;color:var(--text-muted);font-style:italic;margin-bottom:8px;">Free-text tags for your own notes — not ward-enforced.</div>
     <div class="tag-input-row">
       <input type="text" id="sceneTagInput" placeholder="Add tag..." onkeydown="if(event.key==='Enter'){addSceneTag();}">
       <button class="btn btn-ghost btn-sm" onclick="addSceneTag()">+ Add</button>
@@ -727,6 +1017,8 @@ hr.divider { border: none; border-top: 1px solid var(--border); margin: 24px 0; 
     <textarea id="tmplFight" rows="2" placeholder="[Fight branch default...]"></textarea>
     <label>Flight Block</label>
     <textarea id="tmplFlight" rows="2" placeholder="[Flight branch default...]"></textarea>
+    <label>Fawn Block</label>
+    <textarea id="tmplFawn" rows="2" placeholder="[Fawn branch default...]"></textarea>
     <label>Freeze Block</label>
     <textarea id="tmplFreeze" rows="2" placeholder="[Freeze branch default...]"></textarea>
 
@@ -735,6 +1027,7 @@ hr.divider { border: none; border-top: 1px solid var(--border); margin: 24px 0; 
     <div class="grid-3">
       <div><label>Fight DC</label><input type="number" id="tmplDCFight" value="14" min="1" max="20"></div>
       <div><label>Flight DC</label><input type="number" id="tmplDCFlight" value="8" min="1" max="20"></div>
+      <div><label>Fawn DC</label><input type="number" id="tmplDCFawn" value="4" min="1" max="20"></div>
       <div><label>Freeze DC</label><input type="number" id="tmplDCFreeze" value="5" min="1" max="20"></div>
     </div>
 
@@ -753,12 +1046,51 @@ hr.divider { border: none; border-top: 1px solid var(--border); margin: 24px 0; 
   </div>
 </div>
 
+<!-- Banished Name Retirement Modal -->
+<div class="modal-overlay" id="modal-retire-banished">
+  <div class="modal" style="max-width:420px;">
+    <div class="modal-title" style="color:var(--red-bright);">⛔ Retire a Banished Name</div>
+    <p style="font-size:13px;color:var(--text-dim);margin-bottom:16px;line-height:1.6;">
+      Banished Names are the protagonist's hard limits. Retiring one means this ward
+      <em>could</em> appear in future scenes. This cannot be undone from this screen —
+      re-add the name at any time to reinstate it.
+    </p>
+    <div style="background:var(--surface2);border:1px solid var(--border-hot);border-radius:6px;padding:12px 16px;margin-bottom:16px;text-align:center;">
+      <span style="font-family:'Cinzel',serif;font-size:13px;color:var(--gold);letter-spacing:2px;" id="retireTagDisplay"></span>
+    </div>
+    <p style="font-size:12px;color:var(--text-muted);margin-bottom:8px;">
+      Type the ward name exactly to confirm retirement:
+    </p>
+    <input
+      type="text"
+      id="retireTagConfirmInput"
+      placeholder="type ward name here…"
+      autocomplete="off"
+      oninput="onRetireInputChange()"
+      onkeydown="if(event.key==='Enter'){confirmBanishedRetirement();}"
+      style="width:100%;padding:8px 10px;background:var(--surface2);border:1px solid var(--border);border-radius:4px;color:var(--text);font-family:'Crimson Pro',serif;font-size:14px;margin-bottom:16px;"
+    >
+    <div class="flex gap-8 flex-end">
+      <button class="btn btn-ghost" onclick="closeModal('modal-retire-banished')">Cancel</button>
+      <button class="btn btn-danger" id="retireConfirmBtn" onclick="confirmBanishedRetirement()" disabled
+        style="opacity:0.4;cursor:not-allowed;">
+        Retire Name
+      </button>
+    </div>
+  </div>
+</div>
+
 <div class="toast" id="toast"></div>
 
 <script src="../engine/engine.js"></script>
+<script src="../engine/intimacy.js"></script>
+<script src="../engine/sync.js"></script>
+<script src="../demo/demo-data.js"></script>
 <script>
 
 // ── Init ─────────────────────────────────────────────────────
+// Bring legacy campaigns up to the current schema (TAGS.md §II, §XI).
+if (typeof VGEngine.migrateCampaignsSchema === 'function') VGEngine.migrateCampaignsSchema();
 VGEngine.seedSampleCampaign();
 let activeCampaignId = null;
 let currentRoll = null;
@@ -768,11 +1100,142 @@ let tmplTags = [];
 let rollHistory = [];
 let dcModeActive = false;
 
+// ── Ward authoring state (TAGS.md §I–IV) ─────────────────────
+let sceneElementWards = [];
+let sceneIntensityWard = 'suggested';
+let sceneFrameWard = 'consensual-if';
+
+// ── Campaign ward-ack state (TAGS.md §II) ────────────────────
+let campAckedWards = [];
+let campBanishedNames = [];
+let campHallowed = [];
+let campVeiled = [];
+
+// ── Campaign antagonist roster state (max 5) ─────────────────
+let campAntagonists = [];
+const MAX_ANTAGONISTS = 5;
+let lastProcessedSignalAt = sessionStorage.getItem('vg_admin_last_signal_at') || '';
+let activeSafetySignal = null;
+
 window.onload = () => {
   renderCampaigns();
   loadWebhookStatus();
   VGEngine.resumeSession();
+  initRemoteSync();
+  const latest = VGEngine.getLatestSignal ? VGEngine.getLatestSignal() : null;
+  activeSafetySignal = latest || null;
+  if (!lastProcessedSignalAt && latest?.at) lastProcessedSignalAt = latest.at;
+  setInterval(pollSafetyRuntime, 2000);
+  window.addEventListener('storage', onSharedStateChange);
 };
+
+function initRemoteSync() {
+  if (!window.VGSync) return;
+  const cfg = VGSync.getConfig();
+  const api = document.getElementById('syncApiBase');
+  const code = document.getElementById('syncTableCode');
+  if (api) api.value = cfg.apiBase || location.origin;
+  if (code) code.value = cfg.code || '';
+  VGSync.start({
+    onApply: () => {
+      VGEngine.resumeSession();
+      renderCampaigns();
+      renderTemplates();
+      renderHistory();
+      if (document.getElementById('panel-session')?.classList.contains('active')) renderSession();
+    },
+    onStatus: updateSyncStatus,
+    onError: err => updateSyncStatus({ ...VGSync.status(), error: err.message }),
+  });
+  updateSyncStatus(VGSync.status());
+}
+
+function updateSyncStatus(status = (window.VGSync ? VGSync.status() : null)) {
+  const el = document.getElementById('syncStatus');
+  if (!el || !status) return;
+  const state = status.enabled && status.code
+    ? `Remote sync is on. Table code: ${escHtml(status.code)} · revision ${status.lastRev || 0}`
+    : 'Remote sync is off.';
+  el.innerHTML = status.error
+    ? `${state}<br><span style="color:var(--red-bright);">Last error: ${escHtml(status.error)}</span>`
+    : state;
+}
+
+function syncInputsToConfig() {
+  if (!window.VGSync) return;
+  const api = document.getElementById('syncApiBase')?.value || location.origin;
+  VGSync.setApiBase(api);
+}
+
+async function createRemoteTable() {
+  if (!window.VGSync) return;
+  syncInputsToConfig();
+  try {
+    const result = await VGSync.createTable('Velvet Grimoire Table');
+    document.getElementById('syncTableCode').value = result.table.code;
+    toast(`Remote table created: ${result.table.code}`, 'success');
+    updateSyncStatus(VGSync.status());
+  } catch (err) {
+    toast(`Remote table failed: ${err.message}`, 'error');
+    updateSyncStatus({ ...VGSync.status(), error: err.message });
+  }
+}
+
+async function joinRemoteTable() {
+  if (!window.VGSync) return;
+  syncInputsToConfig();
+  const code = document.getElementById('syncTableCode')?.value || '';
+  try {
+    const result = await VGSync.joinTable(code);
+    document.getElementById('syncTableCode').value = result.table.code;
+    VGEngine.resumeSession();
+    renderCampaigns();
+    renderSession();
+    toast(`Joined remote table: ${result.table.code}`, 'success');
+    updateSyncStatus(VGSync.status());
+  } catch (err) {
+    toast(`Join failed: ${err.message}`, 'error');
+    updateSyncStatus({ ...VGSync.status(), error: err.message });
+  }
+}
+
+async function syncNow() {
+  if (!window.VGSync) return;
+  syncInputsToConfig();
+  try {
+    await VGSync.tick();
+    toast('Remote sync complete.', 'success');
+  } catch (err) {
+    toast(`Sync failed: ${err.message}`, 'error');
+  }
+  updateSyncStatus(VGSync.status());
+}
+
+function stopSync() {
+  if (!window.VGSync) return;
+  VGSync.stop();
+  toast('Remote sync stopped.', 'warn');
+  updateSyncStatus(VGSync.status());
+}
+
+function installDemoContent(screenshotMode = false) {
+  if (!window.VGDemo) {
+    toast('Demo installer is missing.', 'error');
+    return;
+  }
+  const existing = VGEngine.getCampaigns().filter(c => c.id !== VGDemo.campaignId);
+  const msg = existing.length
+    ? 'Load the demo alongside your existing campaigns? Existing campaigns will be kept.'
+    : 'Load the Crimson Veil demo campaign now?';
+  if (!confirm(msg)) return;
+  VGDemo.install({ screenshot: screenshotMode, startSession: screenshotMode, role: 'dm' });
+  if (typeof VGEngine.migrateCampaignsSchema === 'function') VGEngine.migrateCampaignsSchema();
+  renderCampaigns();
+  loadWebhookStatus();
+  VGEngine.resumeSession();
+  toast(screenshotMode ? 'Screenshot mode loaded.' : 'Demo campaign loaded.', 'success');
+  showPanel('campaigns');
+}
 
 // ── Navigation ────────────────────────────────────────────────
 function showPanel(name) {
@@ -815,13 +1278,32 @@ function renderCampaigns() {
 
 function openNewCampaignModal() {
   campTags = [];
+  campAckedWards = [];
+  campBanishedNames = [];
+  campHallowed = VGEngine.getWardRegistry().defaultHallowed.slice();
+  campVeiled = [];
+  campAntagonists = [];
   document.getElementById('editCampaignId').value = '';
   document.getElementById('campaignModalTitle').textContent = 'New Campaign';
-  ['campName','campDesc','protName','protClass','protTraits','protNotes','npcName','npcRole','npcPersonality','campTagInput'].forEach(id => {
-    document.getElementById(id).value = '';
+  ['campName','campDesc','protName','protClass','protTraits','protNotes','campTagInput','protBanishedInput','campHallowedInput','campVeiledInput'].forEach(id => {
+    const el = document.getElementById(id); if (el) el.value = '';
   });
+  document.getElementById('campSetting').value = 'tavern';
+  document.getElementById('campRating').value = 'mature';
   renderCampTags();
+  renderCampAckedWards();
+  renderBanishedNames();
+  renderHallowedTags();
+  renderVeiledTags();
+  renderAntagonistList();
   openModal('modal-campaign');
+  setTimeout(() => {
+    renderCampAckedWards();
+    renderBanishedNames();
+    renderHallowedTags();
+    renderVeiledTags();
+    renderAntagonistList();
+  }, 50);
 }
 
 function editCampaign(id) {
@@ -837,12 +1319,224 @@ function editCampaign(id) {
   document.getElementById('protClass').value = c.protagonist?.class || '';
   document.getElementById('protTraits').value = (c.protagonist?.traits||[]).join(', ');
   document.getElementById('protNotes').value = c.protagonist?.notes || '';
-  document.getElementById('npcName').value = c.npc?.name || '';
-  document.getElementById('npcRole').value = c.npc?.role || '';
-  document.getElementById('npcPersonality').value = c.npc?.personality || '';
   campTags = [...(c.tags||[])];
+  campAckedWards = [...(c.ackedWards||[])];
+  campBanishedNames = Array.isArray(c.protagonist?.banishedNames) ? c.protagonist.banishedNames.map(entry => ({ ...entry })) : [];
+  campHallowed = [...(c.hallowed||[])];
+  campVeiled = [...(c.veiled||[])];
+  // Load antagonist roster; fall back to legacy npc → single-entry seed
+  if (Array.isArray(c.antagonists) && c.antagonists.length) {
+    campAntagonists = c.antagonists.map(a => ({ ...a }));
+  } else if (c.npc) {
+    campAntagonists = [{
+      id: freshAntagId(),
+      name: c.npc.name || '',
+      role: c.npc.role || '',
+      personality: c.npc.personality || '',
+      agenda: c.npc.agenda || '',
+      notes: c.npc.notes || '',
+      controlledBy: 'dm',
+    }];
+  } else {
+    campAntagonists = [];
+  }
   renderCampTags();
+  renderCampAckedWards();
+  renderBanishedNames();
+  renderHallowedTags();
+  renderVeiledTags();
+  renderAntagonistList();
   openModal('modal-campaign');
+  setTimeout(() => {
+    renderCampAckedWards();
+    renderBanishedNames();
+    renderHallowedTags();
+    renderVeiledTags();
+    renderAntagonistList();
+  }, 50);
+}
+
+// ── Multi-antagonist UI (TAGS.md §XII forward-compat) ────────
+function freshAntagId() {
+  return Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
+}
+
+function renderAntagonistList() {
+  const list = document.getElementById('antagList');
+  if (!list) return;
+  if (campAntagonists.length === 0) {
+    list.innerHTML = `<div style="font-size:12px;color:var(--text-muted);font-style:italic;padding:10px 0;">No antagonists yet. Click + Add Antagonist to seat one.</div>`;
+  } else {
+    list.innerHTML = campAntagonists.map((a, i) => `
+      <div class="antag-row" data-antag-id="${a.id}">
+        <div class="antag-head">
+          <span class="antag-num">Antagonist ${i+1}</span>
+          <button type="button" class="antag-remove" title="Remove" onclick="removeAntagonist('${a.id}')">✕</button>
+        </div>
+        <div class="grid-2">
+          <div>
+            <label>Name</label>
+            <input type="text" value="${escHtml(a.name||'')}" placeholder="Lord Aldric Voss" oninput="updateAntagonistField('${a.id}','name',this.value)">
+          </div>
+          <div>
+            <label>Role</label>
+            <input type="text" value="${escHtml(a.role||'')}" placeholder="Antagonist / Love Interest" oninput="updateAntagonistField('${a.id}','role',this.value)">
+          </div>
+        </div>
+        <label>Personality &amp; Agenda</label>
+        <textarea rows="2" placeholder="How they move, what they want, where they press." oninput="updateAntagonistField('${a.id}','personality',this.value)">${escHtml(a.personality||'')}</textarea>
+        <label>Notes (optional)</label>
+        <textarea rows="1" placeholder="Private DM notes — hooks, secrets, reversals." oninput="updateAntagonistField('${a.id}','notes',this.value)">${escHtml(a.notes||'')}</textarea>
+      </div>
+    `).join('');
+  }
+  const count = document.getElementById('antagCount');
+  if (count) count.textContent = `(${campAntagonists.length}/${MAX_ANTAGONISTS})`;
+  const addBtn = document.getElementById('antagAddBtn');
+  if (addBtn) addBtn.disabled = campAntagonists.length >= MAX_ANTAGONISTS;
+  if (addBtn) addBtn.style.opacity = (campAntagonists.length >= MAX_ANTAGONISTS) ? 0.5 : 1;
+}
+
+function addAntagonist() {
+  if (campAntagonists.length >= MAX_ANTAGONISTS) return;
+  campAntagonists.push({
+    id: freshAntagId(),
+    name: '',
+    role: '',
+    personality: '',
+    agenda: '',
+    notes: '',
+    controlledBy: 'dm',
+  });
+  renderAntagonistList();
+}
+
+function removeAntagonist(id) {
+  campAntagonists = campAntagonists.filter(a => a.id !== id);
+  renderAntagonistList();
+}
+
+function updateAntagonistField(id, field, value) {
+  const a = campAntagonists.find(x => x.id === id);
+  if (a) a[field] = value;
+}
+
+function escHtml(s) {
+  return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+function normalizeTagText(value) {
+  return String(value || '').trim().toLowerCase();
+}
+
+function addBanishedName() {
+  const input = document.getElementById('protBanishedInput');
+  const tag = normalizeTagText(input.value);
+  if (!tag || campBanishedNames.some(entry => entry.tag === tag)) {
+    input.value = '';
+    return;
+  }
+  campBanishedNames.push({ tag, declaredAt: new Date().toISOString(), note: '' });
+  renderBanishedNames();
+  input.value = '';
+}
+
+function removeBanishedName(tag) {
+  campBanishedNames = campBanishedNames.filter(entry => entry.tag !== tag);
+  renderBanishedNames();
+}
+
+// ── Banished Name retirement (typed confirmation required) ─────
+let _pendingRetireTag = null;
+
+function retireBanishedName(tag) {
+  _pendingRetireTag = tag;
+  document.getElementById('retireTagDisplay').textContent = tag;
+  const input = document.getElementById('retireTagConfirmInput');
+  input.value = '';
+  const btn = document.getElementById('retireConfirmBtn');
+  btn.disabled = true;
+  btn.style.opacity = '0.4';
+  btn.style.cursor = 'not-allowed';
+  openModal('modal-retire-banished');
+  setTimeout(() => input.focus(), 80);
+}
+
+function onRetireInputChange() {
+  const input = document.getElementById('retireTagConfirmInput');
+  const btn   = document.getElementById('retireConfirmBtn');
+  const match = input.value.trim().toLowerCase() === (_pendingRetireTag || '').toLowerCase();
+  btn.disabled = !match;
+  btn.style.opacity = match ? '1' : '0.4';
+  btn.style.cursor  = match ? 'pointer' : 'not-allowed';
+}
+
+function confirmBanishedRetirement() {
+  const input = document.getElementById('retireTagConfirmInput');
+  if (!_pendingRetireTag || input.value.trim().toLowerCase() !== _pendingRetireTag.toLowerCase()) return;
+  removeBanishedName(_pendingRetireTag);
+  _pendingRetireTag = null;
+  closeModal('modal-retire-banished');
+  toast(`Banished Name "${input.value.trim()}" retired. Re-add it at any time to reinstate.`, 'warn');
+}
+
+function renderBanishedNames() {
+  const el = document.getElementById('protBanishedDisplay');
+  if (!el) return;
+  el.innerHTML = campBanishedNames.length
+    ? campBanishedNames.map(entry => `<span class="tag removable" onclick='retireBanishedName(${JSON.stringify(entry.tag)})' title="Retire this Banished Name (requires confirmation)">${escHtml(entry.tag)} ✕</span>`).join('')
+    : `<div style="font-size:12px;color:var(--text-muted);font-style:italic;padding:6px 0;">No Banished Names set.</div>`;
+}
+
+function addHallowedTag() {
+  const input = document.getElementById('campHallowedInput');
+  const tag = normalizeTagText(input.value);
+  if (tag && !campHallowed.includes(tag)) campHallowed.push(tag);
+  renderHallowedTags();
+  input.value = '';
+}
+
+function removeHallowedTag(tag) {
+  const defaults = new Set(VGEngine.getWardRegistry().defaultHallowed || []);
+  if (defaults.has(tag)) {
+    toast('Default Hallowed tags cannot be removed.', 'warn');
+    return;
+  }
+  campHallowed = campHallowed.filter(x => x !== tag);
+  renderHallowedTags();
+}
+
+function renderHallowedTags() {
+  const el = document.getElementById('campHallowedDisplay');
+  if (!el) return;
+  const defaults = new Set(VGEngine.getWardRegistry().defaultHallowed || []);
+  el.innerHTML = campHallowed.length
+    ? campHallowed.map(tag => {
+        const locked = defaults.has(tag);
+        return `<span class="tag ${locked ? '' : 'removable'}" onclick='${locked ? '' : `removeHallowedTag(${JSON.stringify(tag)})`}'>${escHtml(tag)}${locked ? ' 🔒' : ' ✕'}</span>`;
+      }).join('')
+    : `<div style="font-size:12px;color:var(--text-muted);font-style:italic;padding:6px 0;">No Hallowed tags yet.</div>`;
+}
+
+function addVeiledTag() {
+  const input = document.getElementById('campVeiledInput');
+  const tag = normalizeTagText(input.value);
+  if (tag && !campVeiled.includes(tag)) campVeiled.push(tag);
+  renderVeiledTags();
+  input.value = '';
+}
+
+function removeVeiledTag(tag) {
+  campVeiled = campVeiled.filter(x => x !== tag);
+  renderVeiledTags();
+}
+
+function renderVeiledTags() {
+  const el = document.getElementById('campVeiledDisplay');
+  if (!el) return;
+  el.innerHTML = campVeiled.length
+    ? campVeiled.map(tag => `<span class="tag removable" onclick='removeVeiledTag(${JSON.stringify(tag)})'>${escHtml(tag)} ✕</span>`).join('')
+    : `<div style="font-size:12px;color:var(--text-muted);font-style:italic;padding:6px 0;">No Veiled tags yet.</div>`;
 }
 
 function saveCampaignForm() {
@@ -857,23 +1551,79 @@ function saveCampaignForm() {
       class: document.getElementById('protClass').value,
       traits: document.getElementById('protTraits').value.split(',').map(s=>s.trim()).filter(Boolean),
       notes: document.getElementById('protNotes').value,
+      limits: campBanishedNames.map(entry => entry.tag),
+      banishedNames: campBanishedNames.map(entry => ({ ...entry })),
     },
-    npc: {
-      name: document.getElementById('npcName').value,
-      role: document.getElementById('npcRole').value,
-      personality: document.getElementById('npcPersonality').value,
-    },
+    // Legacy npc mirror — first antagonist, so older code paths stay readable.
+    npc: campAntagonists[0]
+      ? {
+          name: campAntagonists[0].name,
+          role: campAntagonists[0].role,
+          personality: campAntagonists[0].personality,
+          agenda: campAntagonists[0].agenda || '',
+          notes: campAntagonists[0].notes || '',
+        }
+      : { name: '', role: '', personality: '' },
+    antagonists: campAntagonists.map(a => ({ ...a })),
     tags: campTags,
+    ackedWards: [...campAckedWards],
+    hallowed: [...campHallowed],
+    veiled: [...campVeiled],
   };
   if (id) {
     const existing = VGEngine.getCampaign(id);
+    // Warn if an existing ack is being removed while scenes still use it.
+    const removed = (existing?.ackedWards||[]).filter(w => !campAckedWards.includes(w));
+    if (removed.length > 0) {
+      const usedByScenes = (existing.scenes||[])
+        .filter(s => (s.elementWards||[]).some(w => removed.includes(w)));
+      if (usedByScenes.length > 0) {
+        const names = usedByScenes.map(s => `• ${s.title}`).join('\n');
+        const proceed = confirm(
+          `⚠ Removing ack for: ${removed.join(', ')}\n\n` +
+          `The following scenes still reference those wards and will fail to save until you either re-ack them or edit the scene to remove those wards:\n\n${names}\n\n` +
+          `Already-saved scenes stay intact — this only affects future saves.\n\nContinue?`
+        );
+        if (!proceed) return;
+      }
+    }
     VGEngine.saveCampaign({ ...existing, ...data, id });
   } else {
     VGEngine.createCampaign(data);
   }
   closeModal('modal-campaign');
   renderCampaigns();
-  toast('Campaign saved!', 'success');
+
+  // Read-back verification so we surface any silent drop.
+  let saved = null;
+  try {
+    saved = id
+      ? VGEngine.getCampaign(id)
+      : VGEngine.getCampaigns().slice(-1)[0];
+  } catch (e) { /* non-fatal */ }
+  const ackCount = (saved && Array.isArray(saved.ackedWards)) ? saved.ackedWards.length : 0;
+  const ackMsg = ackCount ? ` (${ackCount} ward ack${ackCount === 1 ? '' : 's'})` : ' (no ward acks)';
+  toast('Campaign saved!' + ackMsg, 'success');
+}
+
+// ── Ward-ack renderer (TAGS.md §II) ──────────────────────────
+function renderCampAckedWards() {
+  const grid = document.getElementById('campAckedWardGrid');
+  if (!grid) return;
+  const reg = VGEngine.getWardRegistry();
+  const acked = new Set(campAckedWards);
+  grid.innerHTML = reg.hardGated.map(w => {
+    const active = acked.has(w);
+    const cls = 'ward-chip gated' + (active ? ' active' : '');
+    return `<span class="${cls}" onclick="toggleCampAckedWard('${w}')">${w} <span class="lock">🔒</span></span>`;
+  }).join('');
+}
+
+function toggleCampAckedWard(w) {
+  const i = campAckedWards.indexOf(w);
+  if (i >= 0) campAckedWards.splice(i, 1);
+  else campAckedWards.push(w);
+  renderCampAckedWards();
 }
 
 function confirmDeleteCampaign(id) {
@@ -919,7 +1669,7 @@ function renderSceneList() {
         </div>
       </div>
       <div class="card-meta">
-        ${s.requiresRoll ? `Roll required — Fight DC:${s.dc?.fight} | Flight DC:${s.dc?.flight} | Freeze DC:${s.dc?.freeze}` : 'No roll required — DM chooses branch'}
+        ${s.requiresRoll ? `Roll required — Fight DC:${s.dc?.fight} | Flight DC:${s.dc?.flight} | Fawn DC:${s.dc?.fawn ?? 4} | Freeze DC:${s.dc?.freeze}` : 'No roll required — DM chooses branch'}
       </div>
       <p style="font-size:14px;color:var(--text-dim);margin-bottom:10px;line-height:1.6;">${(s.narrative||'').slice(0,150)}${s.narrative?.length>150?'…':''}</p>
       <div class="flex gap-8 align-center flex-wrap">
@@ -927,6 +1677,7 @@ function renderSceneList() {
         <span style="font-size:12px;color:var(--text-muted);margin-left:auto;">
           ⚔ ${s.branches?.fight?.nextSceneId ? getBranchTitle(c,s.branches.fight.nextSceneId) : 'END'} &nbsp;
           🏃 ${s.branches?.flight?.nextSceneId ? getBranchTitle(c,s.branches.flight.nextSceneId) : 'END'} &nbsp;
+          🕊 ${s.branches?.fawn?.nextSceneId ? getBranchTitle(c,s.branches.fawn.nextSceneId) : 'END'} &nbsp;
           🧊 ${s.branches?.freeze?.nextSceneId ? getBranchTitle(c,s.branches.freeze.nextSceneId) : 'END'}
         </span>
       </div>
@@ -942,10 +1693,13 @@ function getBranchTitle(campaign, id) {
 function openNewSceneModal() {
   if (!activeCampaignId) { toast('Select a campaign first.','error'); return; }
   sceneTags = [];
+  sceneElementWards = [];
+  sceneIntensityWard = 'suggested';
+  sceneFrameWard = 'consensual-if';
   document.getElementById('editSceneId').value = '';
   document.getElementById('editSceneCampaignId').value = activeCampaignId;
   document.getElementById('sceneModalTitle').textContent = 'New Scene';
-  ['sceneTitle','sceneNarrative','sceneNpcCue','fightLabel','flightLabel','freezeLabel','fightNarrative','flightNarrative','freezeNarrative','sceneTagInput'].forEach(id => {
+  ['sceneTitle','sceneNarrative','sceneNpcCue','fightLabel','flightLabel','fawnLabel','freezeLabel','fightNarrative','flightNarrative','fawnNarrative','freezeNarrative','sceneTagInput'].forEach(id => {
     document.getElementById(id).value = '';
   });
   document.getElementById('sceneIsStart').checked = false;
@@ -953,9 +1707,11 @@ function openNewSceneModal() {
   document.getElementById('sceneRequiresRoll').checked = true;
   document.getElementById('dcFight').value = 14;
   document.getElementById('dcFlight').value = 8;
+  document.getElementById('dcFawn').value = 4;
   document.getElementById('dcFreeze').value = 5;
   document.getElementById('dcFightVal').textContent = 14;
   document.getElementById('dcFlightVal').textContent = 8;
+  document.getElementById('dcFawnVal').textContent = 4;
   document.getElementById('dcFreezeVal').textContent = 5;
   ['attrTension','attrIntimacy','attrDanger'].forEach(id => {
     document.getElementById(id).value = 5;
@@ -964,6 +1720,8 @@ function openNewSceneModal() {
   populateSceneNextDropdowns(activeCampaignId, null);
   populateTemplateDropdown();
   renderSceneTags();
+  syncWardInputs();
+  renderWardGrid();
   switchBranch('fight');
   openModal('modal-scene');
 }
@@ -984,9 +1742,11 @@ function editScene(campaignId, sceneId) {
   document.getElementById('sceneRequiresRoll').checked = s.requiresRoll !== false;
   document.getElementById('dcFight').value = s.dc?.fight || 14;
   document.getElementById('dcFlight').value = s.dc?.flight || 8;
+  document.getElementById('dcFawn').value = s.dc?.fawn ?? 4;
   document.getElementById('dcFreeze').value = s.dc?.freeze || 5;
   document.getElementById('dcFightVal').textContent = s.dc?.fight || 14;
   document.getElementById('dcFlightVal').textContent = s.dc?.flight || 8;
+  document.getElementById('dcFawnVal').textContent = s.dc?.fawn ?? 4;
   document.getElementById('dcFreezeVal').textContent = s.dc?.freeze || 5;
   document.getElementById('attrTension').value = s.attributes?.tension || 5;
   document.getElementById('attrIntimacy').value = s.attributes?.intimacy || 3;
@@ -994,14 +1754,21 @@ function editScene(campaignId, sceneId) {
   ['tension','intimacy','danger'].forEach(a => updateAttrBar(a));
   document.getElementById('fightLabel').value = s.branches?.fight?.label || '';
   document.getElementById('flightLabel').value = s.branches?.flight?.label || '';
+  document.getElementById('fawnLabel').value = s.branches?.fawn?.label || '';
   document.getElementById('freezeLabel').value = s.branches?.freeze?.label || '';
   document.getElementById('fightNarrative').value = s.branches?.fight?.narrative || '';
   document.getElementById('flightNarrative').value = s.branches?.flight?.narrative || '';
+  document.getElementById('fawnNarrative').value = s.branches?.fawn?.narrative || '';
   document.getElementById('freezeNarrative').value = s.branches?.freeze?.narrative || '';
   sceneTags = [...(s.tags||[])];
+  sceneElementWards = [...(s.elementWards||[])];
+  sceneIntensityWard = s.intensityWard || 'suggested';
+  sceneFrameWard = s.frameWard || 'consensual-if';
   populateSceneNextDropdowns(campaignId, sceneId, s.branches);
   populateTemplateDropdown(s.templateId);
   renderSceneTags();
+  syncWardInputs();
+  renderWardGrid();
   switchBranch('fight');
   openModal('modal-scene');
 }
@@ -1009,7 +1776,7 @@ function editScene(campaignId, sceneId) {
 function populateSceneNextDropdowns(campaignId, currentSceneId, branches) {
   const c = VGEngine.getCampaign(campaignId);
   const others = (c?.scenes||[]).filter(s => s.id !== currentSceneId);
-  ['fight','flight','freeze'].forEach(b => {
+  ['fight','flight','fawn','freeze'].forEach(b => {
     const sel = document.getElementById(b + 'Next');
     sel.innerHTML = '<option value="">— End / TBD —</option>' + others.map(s => `<option value="${s.id}">${s.title}</option>`).join('');
     if (branches?.[b]?.nextSceneId) sel.value = branches[b].nextSceneId;
@@ -1024,32 +1791,51 @@ function populateTemplateDropdown(selectedId) {
 }
 
 function previewTemplate() {
-  const id = document.getElementById('sceneTemplate').value;
-  if (!id) return;
+  const sel = document.getElementById('sceneTemplate');
+  const id = sel.value;
+  if (!id) { sel.dataset.prevValue = ''; return; }
   const t = VGEngine.getTemplates().find(t => t.id === id);
   if (!t) return;
-  if (confirm(`Apply template "${t.name}"? This will fill in narrative blocks, tags, attributes and DCs.`)) {
-    document.getElementById('sceneNarrative').value = t.narrativeBlocks?.dm || '';
-    document.getElementById('sceneNpcCue').value = t.narrativeBlocks?.npc || '';
-    document.getElementById('fightNarrative').value = t.narrativeBlocks?.fight || '';
-    document.getElementById('flightNarrative').value = t.narrativeBlocks?.flight || '';
-    document.getElementById('freezeNarrative').value = t.narrativeBlocks?.freeze || '';
-    document.getElementById('dcFight').value = t.defaultDC?.fight || 14;
-    document.getElementById('dcFlight').value = t.defaultDC?.flight || 8;
-    document.getElementById('dcFreeze').value = t.defaultDC?.freeze || 5;
-    document.getElementById('dcFightVal').textContent = t.defaultDC?.fight || 14;
-    document.getElementById('dcFlightVal').textContent = t.defaultDC?.flight || 8;
-    document.getElementById('dcFreezeVal').textContent = t.defaultDC?.freeze || 5;
-    sceneTags = [...new Set([...sceneTags, ...(t.tags||[])])];
-    renderSceneTags();
-    toast('Template applied!', 'success');
+
+  // Check whether applying this template would overwrite existing draft content.
+  const narrativeFields = ['sceneNarrative', 'sceneNpcCue', 'fightNarrative', 'flightNarrative', 'fawnNarrative', 'freezeNarrative'];
+  const hasContent = narrativeFields.some(fid => (document.getElementById(fid).value || '').trim().length > 0);
+
+  const msg = hasContent
+    ? `Apply template "${t.name}"?\n\n⚠ WARNING: This will OVERWRITE your current narrative, NPC cue, branch text, and DC values. Your in-progress draft in those fields will be lost — there is no undo.\n\nTags will be merged (additive), not replaced.\n\nClick Cancel to keep your draft.`
+    : `Apply template "${t.name}"? This will fill in narrative blocks, DCs, and tags.`;
+
+  if (!confirm(msg)) {
+    // Revert dropdown so the cancelled template doesn't look selected.
+    sel.value = sel.dataset.prevValue || '';
+    return;
   }
+  sel.dataset.prevValue = id;
+
+  document.getElementById('sceneNarrative').value = t.narrativeBlocks?.dm || '';
+  document.getElementById('sceneNpcCue').value = t.narrativeBlocks?.npc || '';
+  document.getElementById('fightNarrative').value = t.narrativeBlocks?.fight || '';
+  document.getElementById('flightNarrative').value = t.narrativeBlocks?.flight || '';
+  document.getElementById('fawnNarrative').value = t.narrativeBlocks?.fawn || '';
+  document.getElementById('freezeNarrative').value = t.narrativeBlocks?.freeze || '';
+  document.getElementById('dcFight').value = t.defaultDC?.fight || 14;
+  document.getElementById('dcFlight').value = t.defaultDC?.flight || 8;
+  document.getElementById('dcFawn').value = t.defaultDC?.fawn ?? 4;
+  document.getElementById('dcFreeze').value = t.defaultDC?.freeze || 5;
+  document.getElementById('dcFightVal').textContent = t.defaultDC?.fight || 14;
+  document.getElementById('dcFlightVal').textContent = t.defaultDC?.flight || 8;
+  document.getElementById('dcFawnVal').textContent = t.defaultDC?.fawn ?? 4;
+  document.getElementById('dcFreezeVal').textContent = t.defaultDC?.freeze || 5;
+  sceneTags = [...new Set([...sceneTags, ...(t.tags||[])])];
+  renderSceneTags();
+  toast('Template applied!', 'success');
 }
 
 function saveSceneForm() {
   const campaignId = document.getElementById('editSceneCampaignId').value;
   const sceneId = document.getElementById('editSceneId').value;
   const data = {
+    id: sceneId || null,
     title: document.getElementById('sceneTitle').value || 'Untitled Scene',
     narrative: document.getElementById('sceneNarrative').value,
     npcCue: document.getElementById('sceneNpcCue').value,
@@ -1057,8 +1843,9 @@ function saveSceneForm() {
     isEnd: document.getElementById('sceneIsEnd').checked,
     requiresRoll: document.getElementById('sceneRequiresRoll').checked,
     dc: {
-      fight: parseInt(document.getElementById('dcFight').value),
+      fight:  parseInt(document.getElementById('dcFight').value),
       flight: parseInt(document.getElementById('dcFlight').value),
+      fawn:   parseInt(document.getElementById('dcFawn').value),
       freeze: parseInt(document.getElementById('dcFreeze').value),
     },
     attributes: {
@@ -1067,13 +1854,37 @@ function saveSceneForm() {
       danger: parseInt(document.getElementById('attrDanger').value),
     },
     branches: {
-      fight:  { label: document.getElementById('fightLabel').value || 'Stand & Fight', narrative: document.getElementById('fightNarrative').value, nextSceneId: document.getElementById('fightNext').value || null },
-      flight: { label: document.getElementById('flightLabel').value || 'Take Flight', narrative: document.getElementById('flightNarrative').value, nextSceneId: document.getElementById('flightNext').value || null },
-      freeze: { label: document.getElementById('freezeLabel').value || 'Hold Position', narrative: document.getElementById('freezeNarrative').value, nextSceneId: document.getElementById('freezeNext').value || null },
+      fight:  { label: document.getElementById('fightLabel').value  || 'Stand & Fight',   narrative: document.getElementById('fightNarrative').value,  nextSceneId: document.getElementById('fightNext').value  || null },
+      flight: { label: document.getElementById('flightLabel').value || 'Take Flight',     narrative: document.getElementById('flightNarrative').value, nextSceneId: document.getElementById('flightNext').value || null },
+      fawn:   { label: document.getElementById('fawnLabel').value   || 'Appease & Yield', narrative: document.getElementById('fawnNarrative').value,   nextSceneId: document.getElementById('fawnNext').value   || null },
+      freeze: { label: document.getElementById('freezeLabel').value || 'Hold Position',   narrative: document.getElementById('freezeNarrative').value, nextSceneId: document.getElementById('freezeNext').value || null },
     },
     tags: sceneTags,
+    elementWards: [...sceneElementWards],
+    intensityWard: sceneIntensityWard,
+    frameWard: sceneFrameWard,
     templateId: document.getElementById('sceneTemplate').value || null,
   };
+
+  // ── Ward validation gate (TAGS.md §I–IV, §XI) ────────────────
+  const campaign = VGEngine.getCampaign(campaignId);
+  if (campaign && typeof VGEngine.validateScene === 'function') {
+    const result = VGEngine.validateScene(data, campaign);
+    if (!result.ok) {
+      const msg = (result.errors || ['Ward validation failed.']).join('\n• ');
+      alert('✦ Ward check halted save:\n\n• ' + msg + '\n\nPlease resolve these before saving.');
+      return;
+    }
+    // Apply any silent adjustments (e.g. veil downgrade of intensity).
+    if (result.adjusted) {
+      if (result.adjusted.intensityWard && result.adjusted.intensityWard !== data.intensityWard) {
+        data.intensityWard = result.adjusted.intensityWard;
+        sceneIntensityWard = result.adjusted.intensityWard;
+      }
+    }
+    (result.warnings || []).forEach(w => toast(w, 'warn'));
+  }
+
   if (sceneId) { VGEngine.updateScene(campaignId, sceneId, data); }
   else { VGEngine.createScene(campaignId, data); }
   closeModal('modal-scene');
@@ -1106,7 +1917,7 @@ function renderTemplates() {
           <button class="btn btn-danger btn-sm" onclick="deleteTemplate('${t.id}')">🗑</button>
         </div>
       </div>
-      <div class="card-meta">${t.contentRating} • DC: Fight ${t.defaultDC?.fight} / Flight ${t.defaultDC?.flight} / Freeze ${t.defaultDC?.freeze}</div>
+      <div class="card-meta">${t.contentRating} • DC: Fight ${t.defaultDC?.fight} / Flight ${t.defaultDC?.flight} / Fawn ${t.defaultDC?.fawn ?? 4} / Freeze ${t.defaultDC?.freeze}</div>
       <p style="font-size:14px;color:var(--text-dim);margin-bottom:10px;">${t.description||''}</p>
       <div>${(t.tags||[]).map(tag=>`<span class="tag">${tag}</span>`).join('')}</div>
     </div>
@@ -1116,9 +1927,10 @@ function renderTemplates() {
 function openNewTemplateModal() {
   tmplTags = [];
   document.getElementById('editTemplateId').value = '';
-  ['tmplName','tmplDesc','tmplDM','tmplNPC','tmplFight','tmplFlight','tmplFreeze','tmplTagInput'].forEach(id => document.getElementById(id).value = '');
+  ['tmplName','tmplDesc','tmplDM','tmplNPC','tmplFight','tmplFlight','tmplFawn','tmplFreeze','tmplTagInput'].forEach(id => document.getElementById(id).value = '');
   document.getElementById('tmplDCFight').value = 14;
   document.getElementById('tmplDCFlight').value = 8;
+  document.getElementById('tmplDCFawn').value = 4;
   document.getElementById('tmplDCFreeze').value = 5;
   renderTmplTags();
   openModal('modal-template');
@@ -1135,9 +1947,11 @@ function editTemplate(id) {
   document.getElementById('tmplNPC').value = t.narrativeBlocks?.npc || '';
   document.getElementById('tmplFight').value = t.narrativeBlocks?.fight || '';
   document.getElementById('tmplFlight').value = t.narrativeBlocks?.flight || '';
+  document.getElementById('tmplFawn').value = t.narrativeBlocks?.fawn || '';
   document.getElementById('tmplFreeze').value = t.narrativeBlocks?.freeze || '';
   document.getElementById('tmplDCFight').value = t.defaultDC?.fight || 14;
   document.getElementById('tmplDCFlight').value = t.defaultDC?.flight || 8;
+  document.getElementById('tmplDCFawn').value = t.defaultDC?.fawn ?? 4;
   document.getElementById('tmplDCFreeze').value = t.defaultDC?.freeze || 5;
   tmplTags = [...(t.tags||[])];
   renderTmplTags();
@@ -1156,11 +1970,13 @@ function saveTemplateForm() {
       npc: document.getElementById('tmplNPC').value,
       fight: document.getElementById('tmplFight').value,
       flight: document.getElementById('tmplFlight').value,
+      fawn: document.getElementById('tmplFawn').value,
       freeze: document.getElementById('tmplFreeze').value,
     },
     defaultDC: {
       fight: parseInt(document.getElementById('tmplDCFight').value),
       flight: parseInt(document.getElementById('tmplDCFlight').value),
+      fawn: parseInt(document.getElementById('tmplDCFawn').value),
       freeze: parseInt(document.getElementById('tmplDCFreeze').value),
     },
     tags: tmplTags,
@@ -1174,8 +1990,7 @@ function saveTemplateForm() {
 
 function deleteTemplate(id) {
   if (confirm('Delete this template?')) {
-    const templates = VGEngine.getTemplates().filter(t => t.id !== id);
-    localStorage.setItem('vg_templates', JSON.stringify(templates));
+    VGEngine.deleteTemplate(id);
     renderTemplates();
     toast('Template deleted.', 'error');
   }
@@ -1185,6 +2000,11 @@ function deleteTemplate(id) {
 function launchSession(campaignId) {
   if (VGEngine.getState().session?.id) {
     if (!confirm('A session is already active. Start a new one?')) return;
+  }
+  if (!VGEngine.getCurrentThreshold || !VGEngine.getCurrentThreshold()) {
+    window.open('/pause.html#threshold', '_blank', 'noopener');
+    toast('Seal the Threshold before starting a session.', 'warn');
+    return;
   }
   VGEngine.startSession(campaignId);
   showPanel('session');
@@ -1201,6 +2021,10 @@ function renderSession() {
   }
   const scene = VGEngine.getCurrentScene();
   const history = VGEngine.getSessionHistory();
+  const threshold = VGEngine.getCurrentThreshold ? VGEngine.getCurrentThreshold() : null;
+  const signalBanner = getSignalBannerHtml();
+  const holdActive = activeSafetySignal?.tier === 'hold';
+  const actionState = holdActive ? 'disabled' : '';
 
   panel.innerHTML = `
     <div class="card" style="border-color:rgba(200,160,96,0.3);">
@@ -1217,10 +2041,28 @@ function renderSession() {
       </div>
     </div>
 
+    ${threshold ? `
+    <div class="card" style="border-color:rgba(200,160,96,0.18);">
+      <div style="font-size:10px;letter-spacing:3px;color:var(--gold-dim);text-transform:uppercase;margin-bottom:8px;">Threshold Sealed</div>
+      <div style="font-size:13px;color:var(--text-dim);line-height:1.7;">
+        <strong style="color:var(--text);">${escHtml(threshold.playerName || 'Player')}</strong> · bandwidth ${threshold.bandwidth || '—'}/10
+        ${threshold.green ? `<br><span style="color:#9edc9e;">Green:</span> ${escHtml(threshold.green)}` : ''}
+        ${threshold.yellow ? `<br><span style="color:#e8b84a;">Yellow:</span> ${escHtml(threshold.yellow)}` : ''}
+        ${threshold.red ? `<br><span style="color:#ff8070;">Red:</span> ${escHtml(threshold.red)}` : ''}
+      </div>
+    </div>` : ''}
+
+    ${signalBanner}
+
     ${scene ? `
     <div class="card" style="border-color:rgba(200,160,96,0.25);">
       <div style="font-size:10px;letter-spacing:3px;color:var(--gold-dim);text-transform:uppercase;margin-bottom:8px;">Current Scene</div>
       <div style="font-family:'Cinzel',serif;font-size:20px;color:var(--gold);margin-bottom:16px;">${scene.title}</div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px;">
+        ${(scene.elementWards || []).map(w => `<span class="tag">${escHtml(w)}</span>`).join('')}
+        <span class="tag">${escHtml(scene.intensityWard || 'suggested')}</span>
+        <span class="tag">${escHtml(scene.frameWard || 'consensual-if')}</span>
+      </div>
 
       <div style="margin-bottom:16px;">
         <div style="font-size:10px;letter-spacing:2px;color:var(--text-muted);text-transform:uppercase;margin-bottom:8px;">DM Narrative</div>
@@ -1243,33 +2085,201 @@ function renderSession() {
       </div>` : ''}
 
       <div style="font-size:11px;letter-spacing:2px;color:var(--text-muted);text-transform:uppercase;margin-bottom:12px;">
-        ${scene.requiresRoll ? `Dice Check Required — Fight ≥${scene.dc?.fight} | Flight ≥${scene.dc?.flight} | Freeze <${scene.dc?.flight}` : 'DM Choice — No Roll Required'}
+        ${scene.requiresRoll ? `Dice Check Required — Fight ≥${scene.dc?.fight} | Flight ≥${scene.dc?.flight} | Fawn ≥${scene.dc?.fawn ?? 4} | Freeze ≥${scene.dc?.freeze}` : 'DM Choice — No Roll Required'}
       </div>
 
       <div class="flex gap-8" style="flex-wrap:wrap;">
-        <button class="btn" style="background:rgba(204,51,34,0.25);border-color:rgba(204,51,34,0.5);color:#ff8070;flex:1;min-width:140px;" onclick="sessionChoice('fight')">
+        <button class="btn" ${actionState} style="background:rgba(204,51,34,0.25);border-color:rgba(204,51,34,0.5);color:#ff8070;flex:1;min-width:140px;${holdActive ? 'opacity:0.5;cursor:not-allowed;' : ''}" onclick="sessionChoice('fight')">
           ⚔ ${scene.branches?.fight?.label || 'Fight'}
         </button>
-        <button class="btn" style="background:rgba(34,102,187,0.25);border-color:rgba(34,102,187,0.5);color:#80a8ff;flex:1;min-width:140px;" onclick="sessionChoice('flight')">
+        <button class="btn" ${actionState} style="background:rgba(34,102,187,0.25);border-color:rgba(34,102,187,0.5);color:#80a8ff;flex:1;min-width:140px;${holdActive ? 'opacity:0.5;cursor:not-allowed;' : ''}" onclick="sessionChoice('flight')">
           🏃 ${scene.branches?.flight?.label || 'Flight'}
         </button>
-        <button class="btn" style="background:rgba(170,136,0,0.25);border-color:rgba(170,136,0,0.5);color:#ffcc50;flex:1;min-width:140px;" onclick="sessionChoice('freeze')">
+        <button class="btn" ${actionState} style="background:rgba(122,58,138,0.25);border-color:rgba(122,58,138,0.5);color:#c090e0;flex:1;min-width:140px;${holdActive ? 'opacity:0.5;cursor:not-allowed;' : ''}" onclick="sessionChoice('fawn')">
+          🕊 ${scene.branches?.fawn?.label || 'Fawn'}
+        </button>
+        <button class="btn" ${actionState} style="background:rgba(170,136,0,0.25);border-color:rgba(170,136,0,0.5);color:#ffcc50;flex:1;min-width:140px;${holdActive ? 'opacity:0.5;cursor:not-allowed;' : ''}" onclick="sessionChoice('freeze')">
           🧊 ${scene.branches?.freeze?.label || 'Freeze'}
         </button>
       </div>
       <div class="flex gap-8 mt-16">
-        <button class="btn btn-ghost btn-sm" onclick="sessionGoBack()">← Back</button>
+        <button class="btn btn-ghost btn-sm" ${actionState} style="${holdActive ? 'opacity:0.5;cursor:not-allowed;' : ''}" onclick="sessionGoBack()">← Back</button>
         <button class="btn btn-ghost btn-sm" onclick="showPanel('dice')">🎲 Roll Dice</button>
         <button class="btn btn-ghost btn-sm" onclick="showPanel('history')">📖 Log</button>
       </div>
     </div>
+    ${renderIntimacyPanel('dm', s, scene, holdActive)}
     ` : `<div class="card"><p style="color:var(--text-dim);text-align:center;font-style:italic;padding:20px 0;">
       ${history.length > 0 ? '✦ Campaign Complete ✦' : 'No starting scene found. Set a scene as "Start" in the scene editor.'}
     </p></div>`}
   `;
 }
 
+function renderIntimacyPanel(role, session, scene, holdActive) {
+  if (!window.VGIntimacy || !session?.id || !scene?.id) return '';
+  const state = VGIntimacy.getSceneState(session.id, scene.id);
+  const effective = VGIntimacy.effectiveConsent(state);
+  const messages = VGIntimacy.getMessages(session.id, scene.id);
+  const cards = VGIntimacy.getCards(session.id, scene.id);
+  const card = cards[role] || { want: [], pace: 'slow', ceiling: 'suggestive', notTonight: '', note: '' };
+  const compatibility = VGIntimacy.getCompatibility(session.id, scene.id);
+  const prompts = VGIntimacy.getPrompts(effective.id);
+  const roleLabel = role === 'dm' ? 'Warden' : 'Protagonist';
+  return `
+    <div class="card intimacy-card">
+      <div class="card-title">Intimate Table</div>
+      <div class="compat-line">
+        Consent ceiling: <strong style="color:var(--gold);">${effective.label}</strong> ·
+        Heat: <strong style="color:var(--gold);">${state.heat}/100 ${VGIntimacy.heatLabel(state.heat)}</strong> ·
+        ${escHtml(compatibility.label)}
+      </div>
+      <div class="intimacy-toolbar">
+        <div>
+          <label>My consent ceiling</label>
+          <select onchange="setIntimacyConsent('${role}', this.value)" ${holdActive ? 'disabled' : ''}>
+            ${VGIntimacy.CONSENT_LEVELS.map(level => `<option value="${level.id}" ${state.consent?.[role] === level.id ? 'selected' : ''}>${level.label}</option>`).join('')}
+          </select>
+          <div style="font-size:12px;color:var(--text-muted);margin-top:6px;">The lower selected ceiling controls the scene.</div>
+        </div>
+        <div>
+          <label>Heat / tension</label>
+          <input type="range" min="0" max="100" value="${state.heat}" oninput="setIntimacyHeat(this.value)" ${holdActive ? 'disabled' : ''}>
+          <div class="heat-track"><div class="heat-fill" style="width:${state.heat}%"></div></div>
+        </div>
+      </div>
+
+      <details style="margin-bottom:14px;">
+        <summary style="cursor:pointer;color:var(--gold);font-family:'Cinzel',serif;font-size:12px;letter-spacing:2px;text-transform:uppercase;">Private want / boundary card</summary>
+        <div style="margin-top:12px;">
+          <div class="want-grid">
+            ${VGIntimacy.WANT_OPTIONS.map(want => `<label class="want-chip"><input type="checkbox" data-want-${role}="${escHtml(want)}" ${(card.want || []).includes(want) ? 'checked' : ''}>${escHtml(want)}</label>`).join('')}
+          </div>
+          <div class="grid-2">
+            <div>
+              <label>Pace</label>
+              <select id="intimacyPace-${role}">
+                ${['slow','steady','intense','fade-to-black'].map(p => `<option value="${p}" ${card.pace === p ? 'selected' : ''}>${p}</option>`).join('')}
+              </select>
+            </div>
+            <div>
+              <label>Ceiling</label>
+              <select id="intimacyCeiling-${role}">
+                ${VGIntimacy.CONSENT_LEVELS.map(level => `<option value="${level.id}" ${card.ceiling === level.id ? 'selected' : ''}>${level.label}</option>`).join('')}
+              </select>
+            </div>
+          </div>
+          <label>Not tonight</label>
+          <input type="text" id="intimacyNotTonight-${role}" value="${escHtml(card.notTonight)}" placeholder="Anything this scene should avoid tonight">
+          <label>Note</label>
+          <textarea id="intimacyNote-${role}" rows="2" placeholder="What would make this scene work better?">${escHtml(card.note)}</textarea>
+          <button class="btn btn-ghost btn-sm mt-16" onclick="saveIntimacyCard('${role}')">Save ${roleLabel} Card</button>
+        </div>
+      </details>
+
+      <div class="prompt-row" style="margin-bottom:12px;">
+        ${prompts.map(prompt => `<button class="prompt-chip" onclick='insertIntimacyPrompt("${role}", ${JSON.stringify(prompt.text)}, ${prompt.heat})'>${escHtml(prompt.label)}</button>`).join('')}
+      </div>
+
+      <div class="chat-log">
+        ${messages.length ? messages.map(msg => `
+          <div class="chat-msg ${msg.role}">
+            <div class="chat-meta"><span>${escHtml(msg.role)} · ${escHtml(VGIntimacy.modeLabel(msg.mode))}</span><span>${new Date(msg.at).toLocaleTimeString()}</span></div>
+            <div style="white-space:pre-wrap;line-height:1.55;color:var(--text);">${escHtml(msg.text)}</div>
+          </div>
+        `).join('') : `<div style="color:var(--text-muted);font-style:italic;font-size:14px;">No intimate table messages yet. Use prompts to keep the exchange in-character and consent-aware.</div>`}
+      </div>
+      <div class="intimacy-chat-row ${holdActive ? 'locked' : ''}">
+        <select id="intimacyMode-${role}">
+          ${VGIntimacy.MODES.map(mode => `<option value="${mode.id}">${mode.label}</option>`).join('')}
+        </select>
+        <textarea id="intimacyText-${role}" rows="3" placeholder="Write an in-character line, action, whisper, or OOC check-in..."></textarea>
+        <button class="btn btn-primary" onclick="sendIntimacyMessage('${role}')">Send</button>
+      </div>
+      <div class="flex gap-8 mt-16" style="flex-wrap:wrap;">
+        <button class="btn btn-ghost btn-sm" onclick="setIntimacyConsent('${role}', 'veil')">Veil / Fade Out</button>
+        <button class="btn btn-ghost btn-sm" onclick="window.open('/pause.html#hearth','_blank','noopener')">Hearth</button>
+      </div>
+    </div>
+  `;
+}
+
+function getIntimacyContext() {
+  const session = VGEngine.getState().session;
+  const scene = VGEngine.getCurrentScene();
+  if (!session?.id || !scene?.id) return null;
+  return { session, scene };
+}
+
+function setIntimacyConsent(role, level) {
+  const ctx = getIntimacyContext();
+  if (!ctx || !window.VGIntimacy) return;
+  VGIntimacy.setConsent(ctx.session.id, ctx.scene.id, role, level);
+  if (level === 'veil') toast('Veil selected. Turn the camera away or move to Hearth.', 'warn');
+  renderSession();
+}
+
+function setIntimacyHeat(value) {
+  const ctx = getIntimacyContext();
+  if (!ctx || !window.VGIntimacy) return;
+  VGIntimacy.setHeat(ctx.session.id, ctx.scene.id, value);
+  renderSession();
+}
+
+function insertIntimacyPrompt(role, text, heat) {
+  const input = document.getElementById(`intimacyText-${role}`);
+  if (!input) return;
+  input.value = input.value ? `${input.value}\n${text}` : text;
+  input.dataset.heat = String(heat || 0);
+  input.focus();
+}
+
+function sendIntimacyMessage(role) {
+  if (activeSafetySignal?.tier === 'hold') {
+    toast('Hold is active. Resume before sending.', 'warn');
+    return;
+  }
+  const ctx = getIntimacyContext();
+  if (!ctx || !window.VGIntimacy) return;
+  const input = document.getElementById(`intimacyText-${role}`);
+  const mode = document.getElementById(`intimacyMode-${role}`)?.value || 'spoken';
+  const heatDelta = Number(input?.dataset.heat || 0);
+  const sent = VGIntimacy.sendMessage({
+    sessionId: ctx.session.id,
+    sceneId: ctx.scene.id,
+    role,
+    mode,
+    text: input?.value || '',
+    heatDelta,
+  });
+  if (sent && input) {
+    input.value = '';
+    input.dataset.heat = '0';
+    renderSession();
+  }
+}
+
+function saveIntimacyCard(role) {
+  const ctx = getIntimacyContext();
+  if (!ctx || !window.VGIntimacy) return;
+  const want = [...document.querySelectorAll(`[data-want-${role}]`)]
+    .filter(el => el.checked)
+    .map(el => el.getAttribute(`data-want-${role}`));
+  VGIntimacy.saveCard(ctx.session.id, ctx.scene.id, role, {
+    want,
+    pace: document.getElementById(`intimacyPace-${role}`)?.value || 'slow',
+    ceiling: document.getElementById(`intimacyCeiling-${role}`)?.value || 'suggestive',
+    notTonight: document.getElementById(`intimacyNotTonight-${role}`)?.value || '',
+    note: document.getElementById(`intimacyNote-${role}`)?.value || '',
+  });
+  toast('Intimate table card saved.', 'success');
+  renderSession();
+}
+
 function sessionChoice(branch) {
+  if (activeSafetySignal?.tier === 'hold') {
+    toast('Hold is active. Resume the page before making a choice.', 'warn');
+    return;
+  }
   const scene = VGEngine.getCurrentScene();
   if (!scene) return;
   const roll = scene.requiresRoll ? VGEngine.DICE.d20() : null;
@@ -1283,9 +2293,92 @@ function sessionChoice(branch) {
 }
 
 function sessionGoBack() {
+  if (activeSafetySignal?.tier === 'hold') {
+    toast('Hold is active. Rewrites should come through the Ember controls.', 'warn');
+    return;
+  }
   VGEngine.goBack();
   renderSession();
   toast('Went back one scene.', 'success');
+}
+
+function getSignalBannerHtml() {
+  if (!activeSafetySignal) return '';
+  const tone = {
+    hold: { label: 'Hold active', color: '#ffc070', body: 'Choices and backtracking are locked until the page is resumed.' },
+    dim: { label: 'Dim signaled', color: '#ffdd80', body: 'Ease the current beat. Pull back without demanding explanation.' },
+    veil: { label: 'Veil signaled', color: '#c0c0ff', body: 'Turn the camera away. Keep narration impressionistic.' },
+    stoke: { label: 'Stoke signaled', color: '#9edc9e', body: 'Affirmative signal received. Do not exceed the scene’s authored intensity.' },
+    rewrite: { label: 'Rewrite received', color: '#ffb0b0', body: 'The last branch choice was taken back and the session log was rewound.' },
+    resume: { label: 'Page resumed', color: '#9edc9e', body: 'The hold is cleared. Proceed gently.' },
+  }[activeSafetySignal.tier];
+  if (!tone) return '';
+  return `<div class="card" style="border-color:${tone.color};">
+    <div style="font-size:10px;letter-spacing:3px;color:${tone.color};text-transform:uppercase;margin-bottom:8px;">${tone.label}</div>
+    <div style="font-size:14px;color:var(--text-dim);line-height:1.7;">${tone.body}</div>
+  </div>`;
+}
+
+function onSharedStateChange(e) {
+  if (['vg_signals','vg_session','vg_intimacy_chat','vg_intimacy_state','vg_intimacy_cards'].includes(e.key)) {
+    if (e.key === 'vg_session' && document.getElementById('panel-session')?.classList.contains('active')) {
+      VGEngine.resumeSession();
+      renderSession();
+    }
+    if (e.key === 'vg_signals') pollSafetyRuntime();
+    if (e.key && e.key.startsWith('vg_intimacy_') && document.getElementById('panel-session')?.classList.contains('active')) {
+      renderSession();
+    }
+  }
+}
+
+function pollSafetyRuntime() {
+  const latest = VGEngine.getLatestSignal ? VGEngine.getLatestSignal() : null;
+  activeSafetySignal = latest || null;
+  if (latest?.at && latest.at !== lastProcessedSignalAt) {
+    handleSafetySignal(latest);
+    lastProcessedSignalAt = latest.at;
+    sessionStorage.setItem('vg_admin_last_signal_at', latest.at);
+  }
+  if (document.getElementById('panel-session')?.classList.contains('active')) {
+    VGEngine.resumeSession();
+    renderSession();
+  }
+}
+
+function handleSafetySignal(signal) {
+  if (!signal) return;
+  if (signal.tier === 'snuff') {
+    VGEngine.clearSession();
+    window.location.href = '/pause.html#hearth';
+    return;
+  }
+  if (signal.tier === 'rewrite') {
+    if (VGEngine.getSessionHistory().length) {
+      VGEngine.goBack();
+      toast('Rewrite received — the last branch choice was rewound.', 'warn');
+    } else {
+      toast('Rewrite received — there was no prior branch to rewind.', 'warn');
+    }
+    renderSession();
+    return;
+  }
+  if (signal.tier === 'hold') {
+    toast('Hold received — pausing choices until the page is resumed.', 'warn');
+    renderSession();
+    return;
+  }
+  if (signal.tier === 'resume') {
+    toast('Resume received — the page can move again.', 'success');
+    renderSession();
+    return;
+  }
+  const labels = {
+    dim: 'Dim received — ease the beat.',
+    veil: 'Veil received — turn the camera away.',
+    stoke: 'Stoke received — affirmative, stay within the scene’s authored bounds.',
+  };
+  if (labels[signal.tier]) toast(labels[signal.tier], 'warn');
 }
 
 // ── History ───────────────────────────────────────────────────
@@ -1364,10 +2457,10 @@ function checkDCDisplay(roll) {
   const scene = VGEngine.getCurrentScene();
   if (!scene?.dc) return;
   const branch = VGEngine.checkDC(roll.result, scene.dc);
-  const colors = { fight:'#ff8070', flight:'#80a8ff', freeze:'#ffcc50' };
+  const colors = { fight:'#ff8070', flight:'#80a8ff', fawn:'#c090e0', freeze:'#ffcc50' };
   const el = document.getElementById('dcResult');
   el.style.display = '';
-  el.innerHTML = `DC Result: <strong style="color:${colors[branch]};font-family:'Cinzel',serif;font-size:18px;">${branch.toUpperCase()}</strong> &nbsp;(Fight≥${scene.dc.fight} | Flight≥${scene.dc.flight} | Freeze<${scene.dc.flight})`;
+  el.innerHTML = `DC Result: <strong style="color:${colors[branch]};font-family:'Cinzel',serif;font-size:18px;">${branch.toUpperCase()}</strong> &nbsp;(Fight≥${scene.dc.fight} | Flight≥${scene.dc.flight} | Fawn≥${scene.dc.fawn ?? 4} | Freeze≥${scene.dc.freeze})`;
 }
 
 function toggleDCMode() {
@@ -1457,6 +2550,48 @@ function renderSceneTags() {
   document.getElementById('sceneTagsDisplay').innerHTML = sceneTags.map(t => `<span class="tag removable" onclick="removeSceneTag('${t}')">${t} ✕</span>`).join('');
 }
 
+// ── Ward authoring (TAGS.md §I–IV) ────────────────────────────
+function renderWardGrid() {
+  const reg = VGEngine.getWardRegistry();
+  const gated = new Set(reg.hardGated);
+  const selected = new Set(sceneElementWards);
+  const grid = document.getElementById('elementWardGrid');
+  if (!grid) return;
+  const groups = Object.entries(reg.elementGroups).map(([groupName, wards]) => {
+    const chips = wards.map(w => {
+      const isGated = gated.has(w);
+      const active  = selected.has(w);
+      const cls = 'ward-chip' + (isGated ? ' gated' : '') + (active ? ' active' : '');
+      const lock = isGated ? ' <span class="lock">🔒</span>' : '';
+      return `<span class="${cls}" onclick="toggleElementWard('${w}')" title="${isGated ? 'Hard-gated — requires campaign ack' : ''}">${w}${lock}</span>`;
+    }).join('');
+    return `<div class="ward-group">
+      <div class="ward-group-title">${groupName}</div>
+      <div>${chips}</div>
+    </div>`;
+  }).join('');
+  grid.innerHTML = groups;
+}
+
+function toggleElementWard(w) {
+  const i = sceneElementWards.indexOf(w);
+  if (i >= 0) sceneElementWards.splice(i, 1);
+  else sceneElementWards.push(w);
+  renderWardGrid();
+}
+
+function syncWardInputs() {
+  // Reflect sceneIntensityWard / sceneFrameWard state into the radio inputs.
+  document.querySelectorAll('input[name="intensityWard"]').forEach(r => {
+    r.checked = (r.value === sceneIntensityWard);
+    r.onchange = () => { sceneIntensityWard = r.value; };
+  });
+  document.querySelectorAll('input[name="frameWard"]').forEach(r => {
+    r.checked = (r.value === sceneFrameWard);
+    r.onchange = () => { sceneFrameWard = r.value; };
+  });
+}
+
 function addTmplTag() {
   const input = document.getElementById('tmplTagInput');
   const val = input.value.trim().toLowerCase();
@@ -1487,8 +2622,24 @@ function switchBranch(b) {
 // ── Data management ───────────────────────────────────────────
 function exportAllData() {
   const data = {
+    schema: 'velvet-grimoire-backup-v2',
     campaigns: VGEngine.getCampaigns(),
     templates: VGEngine.getTemplates(),
+    maps: JSON.parse(localStorage.getItem('vg_maps') || '[]'),
+    activeMapId: localStorage.getItem('vg_active_map_id') || null,
+    session: JSON.parse(localStorage.getItem('vg_session') || 'null'),
+    intimacy: {
+      chat: JSON.parse(localStorage.getItem('vg_intimacy_chat') || '[]'),
+      state: JSON.parse(localStorage.getItem('vg_intimacy_state') || '{}'),
+      cards: JSON.parse(localStorage.getItem('vg_intimacy_cards') || '{}'),
+    },
+    compact: {
+      thresholdCurrent: JSON.parse(localStorage.getItem('vg_threshold_current') || 'null'),
+      thresholds: JSON.parse(localStorage.getItem('vg_thresholds') || '[]'),
+      signals: JSON.parse(localStorage.getItem('vg_signals') || '[]'),
+      stationsDone: JSON.parse(localStorage.getItem('vg_stations_done') || '[]'),
+      hearths: JSON.parse(localStorage.getItem('vg_hearths') || '[]'),
+    },
     exportedAt: new Date().toISOString(),
   };
   const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
@@ -1496,24 +2647,92 @@ function exportAllData() {
   a.download = 'velvet-grimoire-backup.json'; a.click();
 }
 
-function triggerImport() { document.getElementById('importFile').click(); }
+function mergeById(existing, incoming) {
+  const map = new Map((existing || []).map(item => [item.id, item]));
+  (incoming || []).forEach(item => {
+    if (item && item.id) map.set(item.id, item);
+  });
+  return Array.from(map.values());
+}
+
+function restoreBackup(data) {
+  if (!data || !Array.isArray(data.campaigns)) return false;
+  const existingCampaigns = VGEngine.getCampaigns();
+  const existingTemplates = VGEngine.getTemplates();
+  localStorage.setItem('vg_campaigns', JSON.stringify(mergeById(existingCampaigns, data.campaigns)));
+  localStorage.setItem('vg_templates', JSON.stringify(mergeById(existingTemplates, data.templates || [])));
+  if (Array.isArray(data.maps)) {
+    const existingMaps = JSON.parse(localStorage.getItem('vg_maps') || '[]');
+    localStorage.setItem('vg_maps', JSON.stringify(mergeById(existingMaps, data.maps)));
+  }
+  if (data.activeMapId) localStorage.setItem('vg_active_map_id', data.activeMapId);
+  if (data.session) localStorage.setItem('vg_session', JSON.stringify(data.session));
+  if (data.intimacy) {
+    if (Array.isArray(data.intimacy.chat)) localStorage.setItem('vg_intimacy_chat', JSON.stringify(data.intimacy.chat));
+    if (data.intimacy.state && typeof data.intimacy.state === 'object') localStorage.setItem('vg_intimacy_state', JSON.stringify(data.intimacy.state));
+    if (data.intimacy.cards && typeof data.intimacy.cards === 'object') localStorage.setItem('vg_intimacy_cards', JSON.stringify(data.intimacy.cards));
+  }
+  if (data.compact) {
+    if (data.compact.thresholdCurrent) localStorage.setItem('vg_threshold_current', JSON.stringify(data.compact.thresholdCurrent));
+    if (Array.isArray(data.compact.thresholds)) localStorage.setItem('vg_thresholds', JSON.stringify(data.compact.thresholds));
+    if (Array.isArray(data.compact.signals)) localStorage.setItem('vg_signals', JSON.stringify(data.compact.signals));
+    if (Array.isArray(data.compact.stationsDone)) localStorage.setItem('vg_stations_done', JSON.stringify(data.compact.stationsDone));
+    if (Array.isArray(data.compact.hearths)) localStorage.setItem('vg_hearths', JSON.stringify(data.compact.hearths));
+  }
+  if (typeof VGEngine.migrateCampaignsSchema === 'function') VGEngine.migrateCampaignsSchema();
+  return true;
+}
+
+function triggerImport() {
+  const input = document.getElementById('importFile');
+  input.value = ''; // clear previous selection so picking the same file re-fires change
+  input.click();
+}
 function handleImport(e) {
   const file = e.target.files[0];
   if (!file) return;
   const reader = new FileReader();
   reader.onload = ev => {
-    const c = VGEngine.importCampaign(ev.target.result);
-    if (c) { renderCampaigns(); toast('Campaign imported!', 'success'); }
-    else toast('Import failed — invalid JSON.', 'error');
+    let parsed = null;
+    try { parsed = JSON.parse(ev.target.result); } catch (err) {}
+    if (parsed && Array.isArray(parsed.campaigns)) {
+      if (!confirm('Restore this backup? Existing records with matching IDs will be replaced; other records are kept.')) return;
+      if (restoreBackup(parsed)) {
+        VGEngine.resumeSession();
+        renderCampaigns();
+        renderTemplates();
+        toast('Backup restored.', 'success');
+      } else {
+        toast('Restore failed — invalid backup.', 'error');
+      }
+      return;
+    }
+    const result = VGEngine.importCampaign(ev.target.result);
+    if (result && result.ok) {
+      renderCampaigns();
+      toast(`Imported "${result.campaign.name}" — ${(result.campaign.scenes||[]).length} scene(s).`, 'success');
+    } else {
+      const why = (result && result.error) ? result.error : 'invalid JSON';
+      toast(`Import failed — ${why}`, 'error');
+    }
   };
   reader.readAsText(file);
 }
 
 function confirmNukeData() {
-  if (confirm('⚠️ WIPE ALL DATA? This deletes all campaigns, scenes, templates and sessions. Cannot be undone.')) {
-    localStorage.clear();
-    location.reload();
-  }
+  const msg =
+    '⚠️ WIPE CAMPAIGN DATA?\n\n' +
+    'This deletes all campaigns, scenes, templates, maps, sessions, intimate-table messages/cards, the Discord webhook, and the first-install flag.\n\n' +
+    'The Warden\'s Compact — Thresholds, Ember signals, Station checklist, and Hearth seals — will be PRESERVED.\n\n' +
+    'Cannot be undone.';
+  if (!confirm(msg)) return;
+  // Only wipe keys the campaign engine owns. Do NOT use localStorage.clear() —
+  // the Compact (pause.html) writes vg_thresholds / vg_threshold_current /
+  // vg_signals / vg_stations_done / vg_hearths to the same origin, and those
+  // records are the safety floor. They must survive a campaign reset.
+  ['vg_campaigns', 'vg_session', 'vg_webhook', 'vg_templates', 'vg_seeded', 'vg_maps', 'vg_active_map_id', 'vg_intimacy_chat', 'vg_intimacy_state', 'vg_intimacy_cards']
+    .forEach(k => localStorage.removeItem(k));
+  location.reload();
 }
 
 // ── Modals ────────────────────────────────────────────────────
@@ -1538,5 +2757,23 @@ function timeAgo(ts) {
   return Math.floor(s/86400) + 'd ago';
 }
 </script>
+
+<!-- ── The Warden's Compact — pause / ember / hearth ───────── -->
+<a href="/pause.html" target="_blank" rel="noopener"
+   aria-label="Open the Warden's Compact — pause, signal the Ember, reach the Hearth"
+   title="The Warden's Compact — pause / ember / hearth"
+   style="position:fixed;top:14px;right:14px;z-index:9999;
+          display:inline-flex;align-items:center;gap:8px;
+          padding:8px 14px;
+          background:rgba(20,12,10,0.85);
+          border:1px solid rgba(201,169,97,0.55);
+          border-radius:20px;
+          color:#e8c87a;
+          font-family:'Cinzel',serif;font-size:11px;letter-spacing:0.14em;
+          text-decoration:none;text-transform:uppercase;
+          box-shadow:0 0 14px rgba(201,169,97,0.18);
+          -webkit-backdrop-filter:blur(4px);backdrop-filter:blur(4px);">
+  <span aria-hidden="true">🕯️</span><span>Pause</span>
+</a>
 </body>
 </html>

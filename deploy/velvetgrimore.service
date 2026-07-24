@@ -1,0 +1,16 @@
+[Unit]
+Description=Velvet Grimoire backend
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/var/www/velvetgrimore
+ExecStart=/usr/bin/node /var/www/velvetgrimore/server.js
+Restart=always
+RestartSec=5
+Environment=PORT=8765
+User=www-data
+Group=www-data
+
+[Install]
+WantedBy=multi-user.target

@@ -4,6 +4,15 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Velvet Grimoire — Map Editor (DM)</title>
+<!-- ── Role guard: redirect non-DMs back to landing ───────────── -->
+<script>
+(function () {
+  var role = localStorage.getItem('vg_role');
+  if (role !== 'dm') {
+    location.replace('/?reason=dm-only');
+  }
+})();
+</script>
 <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@400;600&family=Crimson+Pro:ital,wght@0,400;0,600;1,400&display=swap" rel="stylesheet">
 <style>
 :root {
@@ -171,8 +180,8 @@ input[type=checkbox]{accent-color:var(--gold);width:14px;height:14px;}
   <div class="sb-section" style="margin-top:auto;">
     <button class="sb-btn" onclick="saveCurrentMap()">💾 Save Map</button>
     <button class="sb-btn" onclick="VGMap.exportMap(activeMapId)">⬇ Export JSON</button>
-    <a href="https://vg.highfunctioningchaos.living/admin/" class="sb-btn" style="text-decoration:none;">← Admin Panel</a>
-    <a href="https://vg.highfunctioningchaos.living/" class="sb-btn" style="text-decoration:none;">⌂ Home</a>
+    <a href="/admin/" class="sb-btn" style="text-decoration:none;">← Admin Panel</a>
+    <a href="/" class="sb-btn" style="text-decoration:none;">⌂ Home</a>
   </div>
 </aside>
 
@@ -406,6 +415,7 @@ input[type=checkbox]{accent-color:var(--gold);width:14px;height:14px;}
 
 <script src="../engine/engine.js"></script>
 <script src="../engine/map-engine.js"></script>
+<script src="../engine/sync.js"></script>
 <script>
 
 // ── State ──────────────────────────────────────────────────
@@ -427,6 +437,7 @@ const ctx = canvas.getContext('2d');
 
 // ── Init ───────────────────────────────────────────────────
 window.onload = () => {
+  if (window.VGSync) VGSync.start({ onApply: () => { loadMapList(); loadCampaignList(); } });
   buildTilePalette();
   buildEventTypePalette();
   buildSeedTypeChecks();
@@ -1128,7 +1139,7 @@ function saveCurrentMap(silent = false) {
 
 function openPlayerMap() {
   if (activeMapId) localStorage.setItem('vg_active_map_id', activeMapId);
-  window.open('https://vg.highfunctioningchaos.living/map/player-map.html', '_blank');
+  window.open('/map/player-map.html', '_blank');
 }
 
 // ── Modals ─────────────────────────────────────────────────

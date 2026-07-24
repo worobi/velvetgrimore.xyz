@@ -1,0 +1,330 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Velvet Grimoire — Dice</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@400;600;700&family=Crimson+Pro:ital,wght@0,400;0,600;1,400&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg: #060408;
+  --surface: #0f0c12;
+  --border: rgba(180,130,80,0.15);
+  --border-hot: rgba(200,160,96,0.4);
+  --gold: #c8a060;
+  --gold-dim: #7a5a28;
+  --text: #e8d5b0;
+  --text-dim: #8a7a6a;
+  --text-muted: #3a2a1a;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html, body { height: 100%; }
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: 'Crimson Pro', serif;
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 40px 20px;
+  position: relative;
+}
+body::before {
+  content: '';
+  position: fixed; inset: 0; z-index: 0;
+  background:
+    radial-gradient(ellipse at 20% 30%, rgba(139,37,0,0.14) 0%, transparent 55%),
+    radial-gradient(ellipse at 80% 70%, rgba(60,20,100,0.18) 0%, transparent 55%),
+    radial-gradient(ellipse at 50% 50%, rgba(30,10,50,0.3) 0%, transparent 80%);
+  pointer-events: none;
+}
+.wrap { position: relative; z-index: 1; max-width: 560px; width: 100%; }
+.eyebrow {
+  font-size: 10px; letter-spacing: 6px; text-transform: uppercase;
+  color: var(--gold-dim); text-align: center; margin-bottom: 12px;
+}
+h1 {
+  font-family: 'Cinzel', serif;
+  font-size: 32px; color: var(--gold); letter-spacing: 4px;
+  text-align: center; margin-bottom: 8px; font-weight: 700;
+}
+.subtitle {
+  font-family: 'Cinzel', serif; font-size: 11px; letter-spacing: 4px;
+  color: var(--text-muted); text-transform: uppercase;
+  text-align: center; margin-bottom: 32px;
+}
+
+/* Result display */
+.result-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 36px 24px 28px;
+  margin-bottom: 24px;
+  text-align: center;
+  min-height: 180px;
+  display: flex; flex-direction: column; justify-content: center;
+}
+.result-value {
+  font-family: 'Cinzel', serif;
+  font-size: 84px;
+  color: var(--gold);
+  line-height: 1;
+  text-shadow: 0 0 40px rgba(200,160,96,0.35);
+  margin-bottom: 8px;
+}
+.result-value.empty { color: var(--text-muted); font-size: 56px; opacity: 0.4; }
+.result-label {
+  font-family: 'Cinzel', serif; font-size: 12px; letter-spacing: 3px;
+  color: var(--text-dim); text-transform: uppercase;
+}
+
+/* Die buttons */
+.dice-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+  margin-bottom: 18px;
+}
+.die-btn {
+  padding: 18px 10px;
+  background: rgba(255,255,255,0.02);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text);
+  font-family: 'Cinzel', serif;
+  font-size: 18px;
+  letter-spacing: 2px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+.die-btn:hover {
+  border-color: var(--border-hot);
+  background: rgba(200,160,96,0.08);
+  color: var(--gold);
+  transform: translateY(-2px);
+}
+.die-btn.rolling { animation: shake 0.4s; }
+@keyframes shake {
+  0%,100% { transform: translateX(0); }
+  25% { transform: translateX(-4px) rotate(-2deg); }
+  50% { transform: translateX(4px) rotate(2deg); }
+  75% { transform: translateX(-2px) rotate(-1deg); }
+}
+
+/* Options row */
+.options {
+  display: flex;
+  gap: 10px;
+  margin-bottom: 22px;
+}
+.option-group {
+  flex: 1;
+  background: rgba(255,255,255,0.02);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 10px 12px;
+}
+.option-label {
+  font-size: 10px;
+  letter-spacing: 2px;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  margin-bottom: 6px;
+}
+.option-group select, .option-group input {
+  width: 100%;
+  background: transparent;
+  border: none;
+  color: var(--text);
+  font-family: 'Crimson Pro', serif;
+  font-size: 14px;
+  padding: 2px 0;
+  outline: none;
+}
+.option-group select { cursor: pointer; }
+.option-group select option { background: var(--surface); color: var(--text); }
+
+/* History */
+.history {
+  border-top: 1px solid var(--border);
+  padding-top: 18px;
+  max-height: 180px;
+  overflow-y: auto;
+}
+.history-title {
+  font-size: 10px; letter-spacing: 3px; color: var(--text-muted);
+  text-transform: uppercase; margin-bottom: 8px;
+}
+.history-item {
+  font-size: 13px;
+  color: var(--text-dim);
+  padding: 4px 0;
+  display: flex; justify-content: space-between;
+  border-bottom: 1px solid rgba(180,130,80,0.07);
+}
+.history-item:last-child { border-bottom: none; }
+.history-value {
+  font-family: 'Cinzel', serif;
+  color: var(--gold);
+}
+
+/* Back link + role chip */
+.topbar {
+  position: fixed; top: 14px; left: 14px; z-index: 10;
+  display: flex; gap: 8px; align-items: center;
+}
+.chip {
+  display: inline-flex; align-items: center; gap: 10px;
+  padding: 8px 14px;
+  background: rgba(20,12,10,0.85);
+  border: 1px solid rgba(201,169,97,0.35);
+  border-radius: 20px;
+  color: #d8b868;
+  font-family: 'Cinzel', serif; font-size: 10px; letter-spacing: 0.18em;
+  text-decoration: none;
+  text-transform: uppercase;
+  backdrop-filter: blur(4px); -webkit-backdrop-filter: blur(4px);
+}
+.chip:hover { border-color: rgba(201,169,97,0.6); color: var(--gold); }
+</style>
+</head>
+<body>
+
+<!-- Topbar: back to landing -->
+<div class="topbar">
+  <a class="chip" href="/">← Landing</a>
+</div>
+
+<!-- ── The Warden's Compact — pause / ember / hearth ───────── -->
+<a href="/pause.html" target="_blank" rel="noopener"
+   aria-label="Open the Warden's Compact — pause, signal the Ember, reach the Hearth"
+   title="The Warden's Compact — pause / ember / hearth"
+   style="position:fixed;top:14px;right:14px;z-index:9999;
+          display:inline-flex;align-items:center;gap:8px;
+          padding:8px 14px;
+          background:rgba(20,12,10,0.85);
+          border:1px solid rgba(201,169,97,0.55);
+          border-radius:20px;
+          color:#e8c87a;
+          font-family:'Cinzel',serif;font-size:11px;letter-spacing:0.14em;
+          text-decoration:none;text-transform:uppercase;
+          box-shadow:0 0 14px rgba(201,169,97,0.18);
+          -webkit-backdrop-filter:blur(4px);backdrop-filter:blur(4px);">
+  <span aria-hidden="true">🕯️</span><span>Pause</span>
+</a>
+
+<div class="wrap">
+  <div class="eyebrow">✦ Velvet Grimoire ✦</div>
+  <h1>Dice</h1>
+  <p class="subtitle">Roll for narration</p>
+
+  <div class="result-card">
+    <div class="result-value empty" id="resultValue">—</div>
+    <div class="result-label" id="resultLabel">Choose a die</div>
+  </div>
+
+  <div class="options">
+    <div class="option-group">
+      <div class="option-label">Roll Type</div>
+      <select id="rollType">
+        <option value="normal">Normal</option>
+        <option value="advantage">Advantage</option>
+        <option value="disadvantage">Disadvantage</option>
+      </select>
+    </div>
+    <div class="option-group">
+      <div class="option-label">Modifier</div>
+      <input type="number" id="modifier" value="0" step="1">
+    </div>
+  </div>
+
+  <div class="dice-grid">
+    <button class="die-btn" onclick="roll(4)">d4</button>
+    <button class="die-btn" onclick="roll(6)">d6</button>
+    <button class="die-btn" onclick="roll(8)">d8</button>
+    <button class="die-btn" onclick="roll(10)">d10</button>
+    <button class="die-btn" onclick="roll(12)">d12</button>
+    <button class="die-btn" onclick="roll(20)">d20</button>
+    <button class="die-btn" onclick="roll(100)" style="grid-column:1/-1;">d100</button>
+  </div>
+
+  <div class="history">
+    <div class="history-title">Recent rolls</div>
+    <div id="historyList">
+      <div class="history-item" style="justify-content:center;color:var(--text-muted);font-style:italic;">
+        No rolls yet.
+      </div>
+    </div>
+  </div>
+</div>
+
+<script src="../engine/sync.js"></script>
+<script>
+if (window.VGSync) VGSync.start();
+const rollHistory = [];
+
+function rollOnce(sides) {
+  return Math.floor(Math.random() * sides) + 1;
+}
+
+function roll(sides) {
+  const type = document.getElementById('rollType').value;
+  const mod = parseInt(document.getElementById('modifier').value) || 0;
+
+  let rolls = [rollOnce(sides)];
+  let chosen = rolls[0];
+  let typeLabel = '';
+
+  if (type === 'advantage') {
+    rolls = [rollOnce(sides), rollOnce(sides)];
+    chosen = Math.max(...rolls);
+    typeLabel = ' (advantage)';
+  } else if (type === 'disadvantage') {
+    rolls = [rollOnce(sides), rollOnce(sides)];
+    chosen = Math.min(...rolls);
+    typeLabel = ' (disadvantage)';
+  }
+
+  const total = chosen + mod;
+
+  document.getElementById('resultValue').textContent = total;
+  document.getElementById('resultValue').classList.remove('empty');
+
+  let label = `d${sides}${typeLabel}`;
+  if (rolls.length > 1) label += ` — rolled ${rolls.join(' / ')}, took ${chosen}`;
+  if (mod !== 0) label += ` ${mod > 0 ? '+' : ''}${mod}`;
+  document.getElementById('resultLabel').textContent = label;
+
+  // Animate the clicked button
+  const btn = [...document.querySelectorAll('.die-btn')].find(b => b.textContent === 'd' + sides);
+  if (btn) {
+    btn.classList.add('rolling');
+    setTimeout(() => btn.classList.remove('rolling'), 400);
+  }
+
+  rollHistory.unshift({ sides, total, rolls, mod, type, at: new Date() });
+  if (rollHistory.length > 12) rollHistory.pop();
+  renderHistory();
+}
+
+function renderHistory() {
+  const list = document.getElementById('historyList');
+  if (!rollHistory.length) {
+    list.innerHTML = '<div class="history-item" style="justify-content:center;color:var(--text-muted);font-style:italic;">No rolls yet.</div>';
+    return;
+  }
+  list.innerHTML = rollHistory.map(r => {
+    const modStr = r.mod !== 0 ? ` ${r.mod > 0 ? '+' : ''}${r.mod}` : '';
+    const typeStr = r.type !== 'normal' ? ` (${r.type})` : '';
+    return `<div class="history-item">
+      <span>d${r.sides}${typeStr}${modStr}</span>
+      <span class="history-value">${r.total}</span>
+    </div>`;
+  }).join('');
+}
+</script>
+</body>
+</html>

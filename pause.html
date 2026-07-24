@@ -1,0 +1,1263 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Velvet Grimoire — The Warden's Compact</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@400;600;700&family=Crimson+Pro:ital,wght@0,300;0,400;0,600;1,300;1,400&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg: #060408;
+  --surface: #0f0c12;
+  --surface2: #1a1420;
+  --border: rgba(180,130,80,0.15);
+  --border-hot: rgba(200,160,96,0.4);
+  --gold: #c8a060;
+  --gold-dim: #7a5a28;
+  --red: #8b2500;
+  --red-bright: #cc3322;
+  --purple: #9060c0;
+  --purple-dim: #604080;
+  --amber: #aa8800;
+  --amber-bright: #e8b84a;
+  --rose: #c06090;
+  --green-calm: #5a8a5a;
+  --text: #e8d5b0;
+  --text-dim: #8a7a6a;
+  --text-muted: #3a2a1a;
+  --dim: #ffcc50;
+  --hold: #ff9040;
+  --snuff: #ff4040;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html, body { min-height: 100%; }
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: 'Crimson Pro', serif;
+  font-size: 17px;
+  line-height: 1.7;
+  min-height: 100vh;
+  position: relative;
+  overflow-x: hidden;
+}
+
+/* Atmospheric layers — matched to landing */
+body::before {
+  content: '';
+  position: fixed; inset: 0; z-index: 0;
+  background:
+    radial-gradient(ellipse at 20% 20%, rgba(139,37,0,0.14) 0%, transparent 55%),
+    radial-gradient(ellipse at 80% 80%, rgba(60,20,100,0.16) 0%, transparent 55%),
+    radial-gradient(ellipse at 50% 50%, rgba(30,10,50,0.3) 0%, transparent 80%);
+  pointer-events: none;
+}
+body::after {
+  content: '';
+  position: fixed; inset: 0; z-index: 0;
+  opacity: 0.03;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)'/%3E%3C/svg%3E");
+  pointer-events: none;
+}
+
+.container {
+  position: relative; z-index: 1;
+  max-width: 860px;
+  margin: 0 auto;
+  padding: 48px 24px 120px;
+}
+
+/* Persistent Ember — always visible */
+.ember-fixed {
+  position: fixed;
+  top: 20px; right: 20px;
+  z-index: 50;
+  background: rgba(139,37,0,0.3);
+  border: 1px solid rgba(200,80,40,0.5);
+  border-radius: 50px;
+  padding: 12px 20px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-family: 'Cinzel', serif;
+  font-size: 11px;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  color: #f0c090;
+  transition: all 0.2s;
+  box-shadow: 0 4px 20px rgba(139,37,0,0.3);
+}
+.ember-fixed:hover {
+  background: rgba(139,37,0,0.5);
+  transform: translateY(-2px);
+  box-shadow: 0 6px 30px rgba(139,37,0,0.5);
+}
+.ember-fixed .flame {
+  font-size: 18px;
+  animation: flicker 1.5s ease-in-out infinite alternate;
+}
+@keyframes flicker {
+  from { opacity: 0.75; transform: scaleY(1); text-shadow: 0 0 10px rgba(255,160,60,0.5); }
+  to   { opacity: 1; transform: scaleY(1.08); text-shadow: 0 0 18px rgba(255,180,80,0.8); }
+}
+
+/* Header */
+header {
+  text-align: center;
+  margin-bottom: 48px;
+  padding-bottom: 36px;
+  border-bottom: 1px solid var(--border);
+}
+.sigil {
+  font-size: 52px;
+  filter: drop-shadow(0 0 30px rgba(200,120,60,0.5));
+  animation: glow 3s ease-in-out infinite alternate;
+  margin-bottom: 14px;
+}
+@keyframes glow {
+  from { filter: drop-shadow(0 0 20px rgba(200,120,60,0.4)); }
+  to   { filter: drop-shadow(0 0 50px rgba(200,120,60,0.7)); }
+}
+.eyebrow {
+  font-size: 10px;
+  letter-spacing: 6px;
+  text-transform: uppercase;
+  color: var(--gold-dim);
+  margin-bottom: 12px;
+}
+h1 {
+  font-family: 'Cinzel', serif;
+  font-size: clamp(28px, 5vw, 44px);
+  color: var(--gold);
+  letter-spacing: 3px;
+  line-height: 1.15;
+  margin-bottom: 10px;
+  text-shadow: 0 0 40px rgba(200,120,60,0.3);
+}
+.subtitle {
+  font-family: 'Cinzel', serif;
+  font-size: 12px;
+  letter-spacing: 3px;
+  color: var(--text-muted);
+  text-transform: uppercase;
+}
+
+/* Tabs */
+.tabs {
+  display: flex;
+  gap: 0;
+  margin-bottom: 36px;
+  border-bottom: 1px solid var(--border);
+  flex-wrap: wrap;
+  justify-content: center;
+}
+.tab {
+  padding: 14px 22px;
+  cursor: pointer;
+  font-family: 'Cinzel', serif;
+  font-size: 12px;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  color: var(--text-dim);
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+  transition: all 0.2s;
+}
+.tab:hover { color: var(--text); }
+.tab.active {
+  color: var(--gold);
+  border-bottom-color: var(--gold);
+}
+
+/* Panel */
+.panel { display: none; animation: fadeIn 0.3s ease; }
+.panel.active { display: block; }
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(6px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+/* Section titles */
+h2 {
+  font-family: 'Cinzel', serif;
+  font-size: 22px;
+  color: var(--gold);
+  letter-spacing: 2px;
+  margin-bottom: 8px;
+  font-weight: 400;
+}
+h3 {
+  font-family: 'Cinzel', serif;
+  font-size: 15px;
+  color: var(--gold);
+  letter-spacing: 2px;
+  margin: 24px 0 12px;
+  font-weight: 400;
+}
+.section-sub {
+  font-size: 15px;
+  color: var(--text-dim);
+  font-style: italic;
+  margin-bottom: 24px;
+  line-height: 1.6;
+}
+
+/* Cards */
+.card {
+  background: rgba(15,12,18,0.7);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 24px 26px;
+  margin-bottom: 20px;
+  backdrop-filter: blur(6px);
+}
+.card.emphasis {
+  border-color: var(--border-hot);
+  background: rgba(200,160,96,0.05);
+}
+.card-title {
+  font-family: 'Cinzel', serif;
+  font-size: 13px;
+  letter-spacing: 2px;
+  color: var(--gold);
+  text-transform: uppercase;
+  margin-bottom: 14px;
+}
+
+/* Inputs */
+label {
+  display: block;
+  font-size: 11px;
+  letter-spacing: 3px;
+  text-transform: uppercase;
+  color: var(--text-dim);
+  margin-bottom: 6px;
+  margin-top: 18px;
+}
+input[type=text], input[type=number], textarea, select {
+  width: 100%;
+  background: rgba(0,0,0,0.35);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 12px 14px;
+  color: var(--text);
+  font-family: 'Crimson Pro', serif;
+  font-size: 16px;
+  line-height: 1.6;
+  outline: none;
+  transition: border 0.2s;
+}
+input:focus, textarea:focus { border-color: var(--border-hot); }
+textarea { min-height: 90px; resize: vertical; }
+
+/* Slider rows */
+.slider-row {
+  display: grid;
+  grid-template-columns: 140px 1fr 40px;
+  align-items: center;
+  gap: 14px;
+  margin-bottom: 12px;
+}
+.slider-row label {
+  margin: 0;
+  text-align: left;
+  font-size: 12px;
+}
+input[type=range] {
+  width: 100%;
+  accent-color: var(--gold);
+}
+.slider-val {
+  font-family: 'Cinzel', serif;
+  font-size: 16px;
+  color: var(--gold);
+  text-align: right;
+}
+
+/* Tag pills */
+.tag-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+}
+.pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 14px;
+  border-radius: 20px;
+  font-size: 13px;
+  border: 1px solid var(--border);
+  color: var(--text-dim);
+  background: rgba(255,255,255,0.03);
+  cursor: pointer;
+  transition: all 0.15s;
+  font-family: 'Crimson Pro', serif;
+}
+.pill:hover { border-color: var(--border-hot); color: var(--text); }
+.pill.active {
+  border-color: var(--gold);
+  color: var(--gold);
+  background: rgba(200,160,96,0.12);
+}
+.pill.banish {
+  border-color: rgba(204,51,34,0.4);
+  color: #ff8070;
+  background: rgba(204,51,34,0.1);
+}
+.pill.banish.active {
+  border-color: var(--red-bright);
+  background: rgba(204,51,34,0.25);
+  color: #ffb090;
+}
+
+/* Ember buttons (3 tiers) */
+.ember-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 14px;
+  margin: 8px 0 4px;
+}
+@media (min-width: 720px) {
+  .ember-grid { grid-template-columns: 1fr 1fr 1fr; }
+}
+.ember-btn {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 22px 18px;
+  border-radius: 8px;
+  border: 1px solid;
+  cursor: pointer;
+  font-family: 'Cinzel', serif;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  transition: all 0.2s;
+  background: rgba(0,0,0,0.3);
+}
+.ember-btn:hover { transform: translateY(-3px); }
+.ember-btn .glyph { font-size: 32px; }
+.ember-btn .label { font-size: 13px; font-weight: 600; }
+.ember-btn .desc {
+  font-family: 'Crimson Pro', serif;
+  font-size: 13px;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--text-dim);
+  font-style: italic;
+  line-height: 1.5;
+  text-align: center;
+}
+.ember-dim {
+  border-color: rgba(255,204,80,0.3);
+  color: var(--dim);
+  background: rgba(255,204,80,0.06);
+}
+.ember-dim:hover {
+  border-color: rgba(255,204,80,0.7);
+  box-shadow: 0 8px 40px rgba(255,204,80,0.2);
+}
+.ember-hold {
+  border-color: rgba(255,144,64,0.3);
+  color: var(--hold);
+  background: rgba(255,144,64,0.06);
+}
+.ember-hold:hover {
+  border-color: rgba(255,144,64,0.7);
+  box-shadow: 0 8px 40px rgba(255,144,64,0.25);
+}
+.ember-snuff {
+  border-color: rgba(255,64,64,0.4);
+  color: var(--snuff);
+  background: rgba(255,64,64,0.08);
+}
+.ember-snuff:hover {
+  border-color: rgba(255,64,64,0.8);
+  box-shadow: 0 8px 40px rgba(255,64,64,0.35);
+}
+
+/* Buttons */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 26px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-family: 'Cinzel', serif;
+  font-size: 12px;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  border: 1px solid;
+  transition: all 0.2s;
+  text-decoration: none;
+  background: transparent;
+}
+.btn-primary {
+  background: rgba(139,37,0,0.3);
+  border-color: rgba(180,60,30,0.5);
+  color: #f0c090;
+}
+.btn-primary:hover { background: rgba(139,37,0,0.5); }
+.btn-gold {
+  background: rgba(200,160,96,0.15);
+  border-color: var(--gold-dim);
+  color: var(--gold);
+}
+.btn-gold:hover { background: rgba(200,160,96,0.28); }
+.btn-ghost {
+  border-color: var(--border);
+  color: var(--text-dim);
+}
+.btn-ghost:hover { border-color: var(--border-hot); color: var(--text); }
+
+/* Ember overlay — takes over screen when lit */
+.ember-overlay {
+  position: fixed; inset: 0; z-index: 200;
+  background: rgba(6,4,8,0.97);
+  display: none;
+  align-items: center;
+  justify-content: center;
+  padding: 32px;
+}
+.ember-overlay.open { display: flex; }
+.ember-overlay-inner {
+  max-width: 640px;
+  width: 100%;
+  text-align: center;
+}
+.ember-overlay h2 {
+  font-size: clamp(26px, 6vw, 44px);
+  color: var(--gold);
+  margin-bottom: 20px;
+  letter-spacing: 3px;
+}
+.ember-overlay p {
+  font-size: 17px;
+  color: var(--text-dim);
+  margin-bottom: 16px;
+  line-height: 1.7;
+}
+.ember-overlay .big-candle {
+  font-size: 72px;
+  margin-bottom: 24px;
+  animation: flicker 1.4s ease-in-out infinite alternate;
+}
+
+/* Breath guide */
+.breath-ring {
+  width: 220px; height: 220px;
+  border-radius: 50%;
+  margin: 20px auto 24px;
+  border: 2px solid var(--gold-dim);
+  display: flex; align-items: center; justify-content: center;
+  font-family: 'Cinzel', serif;
+  font-size: 18px;
+  letter-spacing: 3px;
+  color: var(--gold);
+  text-transform: uppercase;
+  animation: breathe 10s ease-in-out infinite;
+  box-shadow: inset 0 0 40px rgba(200,160,96,0.1), 0 0 60px rgba(200,160,96,0.08);
+}
+@keyframes breathe {
+  0%   { transform: scale(0.7); border-color: var(--gold-dim); }
+  40%  { transform: scale(1); border-color: var(--gold); box-shadow: inset 0 0 60px rgba(200,160,96,0.2), 0 0 80px rgba(200,160,96,0.15); }
+  50%  { transform: scale(1); }
+  90%  { transform: scale(0.7); border-color: var(--gold-dim); }
+  100% { transform: scale(0.7); }
+}
+
+/* Hearth stations checklist */
+.station {
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+  padding: 16px 18px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  margin-bottom: 10px;
+  background: rgba(0,0,0,0.25);
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.station:hover { border-color: var(--border-hot); }
+.station.done {
+  border-color: var(--green-calm);
+  background: rgba(90,138,90,0.08);
+  opacity: 0.7;
+}
+.station-check {
+  width: 26px; height: 26px;
+  border-radius: 50%;
+  border: 1px solid var(--gold-dim);
+  display: flex; align-items: center; justify-content: center;
+  font-size: 14px;
+  color: transparent;
+  flex-shrink: 0;
+  transition: all 0.15s;
+}
+.station.done .station-check {
+  color: var(--green-calm);
+  border-color: var(--green-calm);
+  background: rgba(90,138,90,0.15);
+}
+.station-body { flex: 1; }
+.station-title {
+  font-family: 'Cinzel', serif;
+  font-size: 14px;
+  color: var(--gold);
+  letter-spacing: 1px;
+  margin-bottom: 4px;
+}
+.station-desc {
+  font-size: 14px;
+  color: var(--text-dim);
+  line-height: 1.6;
+  font-style: italic;
+}
+
+/* Resources */
+.resource-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 10px;
+}
+@media (min-width: 680px) {
+  .resource-grid { grid-template-columns: 1fr 1fr; }
+}
+.resource {
+  padding: 14px 16px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: rgba(0,0,0,0.25);
+  font-size: 14px;
+  line-height: 1.55;
+}
+.resource strong {
+  font-family: 'Cinzel', serif;
+  color: var(--gold);
+  font-size: 12px;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  display: block;
+  margin-bottom: 4px;
+  font-weight: 400;
+}
+.resource .meta {
+  color: var(--text-dim);
+  font-style: italic;
+  font-size: 13px;
+  margin-top: 4px;
+}
+
+/* Preamble block */
+blockquote {
+  border-left: 3px solid var(--gold-dim);
+  padding: 12px 20px;
+  margin: 20px 0;
+  color: var(--text-dim);
+  font-style: italic;
+  font-size: 15px;
+  line-height: 1.8;
+  background: rgba(200,160,96,0.04);
+}
+
+/* Two-column layout for Threshold */
+.grid-2 {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 16px;
+}
+@media (min-width: 760px) {
+  .grid-2 { grid-template-columns: 1fr 1fr; }
+}
+
+/* Seal */
+.seal {
+  text-align: center;
+  padding: 32px 20px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: rgba(0,0,0,0.3);
+  margin-top: 32px;
+}
+.seal p {
+  font-style: italic;
+  color: var(--text-dim);
+  line-height: 2;
+  margin-bottom: 20px;
+}
+
+/* Toast */
+.toast {
+  position: fixed;
+  bottom: 32px; left: 50%;
+  transform: translateX(-50%) translateY(20px);
+  z-index: 300;
+  background: var(--surface);
+  border: 1px solid var(--border-hot);
+  color: var(--gold);
+  padding: 14px 26px;
+  border-radius: 4px;
+  font-family: 'Cinzel', serif;
+  font-size: 12px;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  opacity: 0;
+  transition: all 0.3s;
+  pointer-events: none;
+  box-shadow: 0 8px 40px rgba(0,0,0,0.6);
+}
+.toast.show {
+  opacity: 1;
+  transform: translateX(-50%) translateY(0);
+}
+
+/* Scrollbar */
+::-webkit-scrollbar { width: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--text-muted); border-radius: 3px; }
+
+/* Helpers */
+.mt-24 { margin-top: 24px; }
+.mt-16 { margin-top: 16px; }
+.flex { display: flex; gap: 10px; flex-wrap: wrap; }
+.flex-center { justify-content: center; }
+.flex-end { justify-content: flex-end; }
+.candle-row {
+  display: flex;
+  justify-content: center;
+  gap: 32px;
+  margin: 12px 0 20px;
+  opacity: 0.75;
+}
+.candle {
+  font-size: 24px;
+  animation: flicker 1.6s ease-in-out infinite alternate;
+}
+.candle:nth-child(2) { animation-delay: 0.3s; animation-duration: 1.9s; }
+.candle:nth-child(3) { animation-delay: 0.6s; animation-duration: 1.4s; }
+</style>
+</head>
+<body>
+
+<!-- Persistent ember — always accessible -->
+<button class="ember-fixed" onclick="openEmberOverlay()" title="The Ember — always lit">
+  <span class="flame">🕯️</span>
+  <span>The Ember</span>
+</button>
+
+<div class="container">
+
+<header>
+  <div class="eyebrow">✦ Velvet Grimoire ✦</div>
+  <div class="sigil">🕯️</div>
+  <h1>The Warden's Compact</h1>
+  <div class="subtitle">Threshold · Ember · Hearth</div>
+</header>
+
+<div class="tabs">
+  <button class="tab active" data-tab="threshold" onclick="showTab('threshold')">The Threshold</button>
+  <button class="tab" data-tab="ember" onclick="showTab('ember')">The Ember</button>
+  <button class="tab" data-tab="hearth" onclick="showTab('hearth')">The Hearth</button>
+  <button class="tab" data-tab="compact" onclick="showTab('compact')">The Compact</button>
+</div>
+
+<!-- ══════════════════════════════════════════════════════════════ -->
+<!-- THE THRESHOLD — Pre-session check-in -->
+<!-- ══════════════════════════════════════════════════════════════ -->
+<div class="panel active" id="panel-threshold">
+  <h2>The Threshold</h2>
+  <p class="section-sub">Before the candle is lit, both players speak to these six questions. Honestly. The answers are visible to each other. No scene opens without the Threshold.</p>
+
+  <div class="card">
+    <div class="card-title">Who approaches the Grimoire?</div>
+    <div class="grid-2">
+      <div>
+        <label>Player name or handle</label>
+        <input type="text" id="thPlayerName" placeholder="e.g. Brandon">
+      </div>
+      <div>
+        <label>Role at the table tonight</label>
+        <select id="thPlayerRole">
+          <option value="dm">Dungeon Master</option>
+          <option value="npc">NPC / Protagonist counterpart</option>
+          <option value="boss">Boss / Antagonist</option>
+        </select>
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-title">I. Body — What is reporting tonight?</div>
+    <div class="slider-row">
+      <label>Tension</label>
+      <input type="range" min="1" max="10" value="5" id="bodyTension" oninput="this.nextElementSibling.textContent=this.value">
+      <span class="slider-val">5</span>
+    </div>
+    <div class="slider-row">
+      <label>Exhaustion</label>
+      <input type="range" min="1" max="10" value="5" id="bodyFatigue" oninput="this.nextElementSibling.textContent=this.value">
+      <span class="slider-val">5</span>
+    </div>
+    <div class="slider-row">
+      <label>Hunger / thirst</label>
+      <input type="range" min="1" max="10" value="3" id="bodyHunger" oninput="this.nextElementSibling.textContent=this.value">
+      <span class="slider-val">3</span>
+    </div>
+    <div class="slider-row">
+      <label>Pain</label>
+      <input type="range" min="1" max="10" value="2" id="bodyPain" oninput="this.nextElementSibling.textContent=this.value">
+      <span class="slider-val">2</span>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-title">II. Bandwidth — From candle-stub to bonfire</div>
+    <div class="slider-row">
+      <label>Energy for play</label>
+      <input type="range" min="1" max="10" value="6" id="bandwidth" oninput="this.nextElementSibling.textContent=this.value">
+      <span class="slider-val">6</span>
+    </div>
+    <p style="font-size:14px;color:var(--text-dim);font-style:italic;margin-top:8px;">1 = can barely hold a candle. 5 = enough for a gentle scene. 10 = bring the storm.</p>
+  </div>
+
+  <div class="card">
+    <div class="card-title">III. Green — What am I hungry for?</div>
+    <textarea id="greenText" placeholder="Tonight I want to explore... Be met with... Find out what happens when..."></textarea>
+  </div>
+
+  <div class="card">
+    <div class="card-title">IV. Yellow — Open, but uncertain</div>
+    <textarea id="yellowText" placeholder="I'm curious about... but check in with me before we cross into..."></textarea>
+  </div>
+
+  <div class="card">
+    <div class="card-title">V. Red — Not tonight</div>
+    <p style="font-size:14px;color:var(--text-dim);margin-bottom:12px;">Separate from the permanent Banished Names. These are today's specific "not tonight" items.</p>
+    <textarea id="redText" placeholder="Even if normally permitted, these are off the page tonight..."></textarea>
+  </div>
+
+  <div class="card">
+    <div class="card-title">VI. Aftercare — What I'll want when the book closes</div>
+    <div class="tag-row" id="aftercareTags">
+      <!-- populated by JS -->
+    </div>
+  </div>
+
+  <div class="flex mt-24 flex-end">
+    <button class="btn btn-ghost" onclick="clearThreshold()">Clear</button>
+    <button class="btn btn-gold" onclick="saveThreshold()">✦ Seal the Threshold</button>
+  </div>
+
+  <div id="thresholdSummary" style="display:none;" class="card emphasis mt-24">
+    <div class="card-title">The Threshold, Sealed</div>
+    <div id="thresholdSummaryBody"></div>
+    <div class="flex mt-16 flex-end">
+      <button class="btn btn-ghost" onclick="editThreshold()">Edit</button>
+      <a class="btn btn-primary" href="./index.html">✦ Enter the Grimoire</a>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════════════════════════════ -->
+<!-- THE EMBER — Mid-session pause signals -->
+<!-- ══════════════════════════════════════════════════════════════ -->
+<div class="panel" id="panel-ember">
+  <h2>The Ember</h2>
+  <p class="section-sub">At every moment of play, the ember is lit. Either player may signal. The signal is never questioned in the moment.</p>
+
+  <div class="card emphasis">
+    <div class="candle-row">
+      <span class="candle">🕯️</span>
+      <span class="candle">🕯️</span>
+      <span class="candle">🕯️</span>
+    </div>
+    <h3 style="text-align:center;margin-top:0;">Signal a Warden's Watch</h3>
+    <div class="ember-grid">
+      <button class="ember-btn ember-dim" onclick="sendSignal('dim')">
+        <span class="glyph">🟡</span>
+        <span class="label">Dim the Flame</span>
+        <span class="desc">"Slow the page." Keep going, but softer. Ease intensity on this particular beat.</span>
+      </button>
+      <button class="ember-btn ember-hold" onclick="sendSignal('hold')">
+        <span class="glyph">🟠</span>
+        <span class="label">Hold the Flame</span>
+        <span class="desc">"Stay the page." Pause. I need a breath. I don't know yet if I want to continue.</span>
+      </button>
+      <button class="ember-btn ember-snuff" onclick="sendSignal('snuff')">
+        <span class="glyph">🔴</span>
+        <span class="label">Snuff the Ember</span>
+        <span class="desc">"Close the book." End the scene. Now. No negotiation. Transition to the Hearth.</span>
+      </button>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-title">Finer Watches (in-scene, no stop)</div>
+    <div class="flex" style="gap:10px;margin-top:8px;">
+      <button class="pill" onclick="sendSignal('veil')">🌫️ Veil — turn the camera away</button>
+      <button class="pill" onclick="sendSignal('stoke')">🔥 Stoke — this is working, go further</button>
+      <button class="pill" onclick="sendSignal('rewrite')">✍️ Rewrite — take the last beat back</button>
+      <button class="pill" onclick="sendSignal('resume')">✅ Resume — the page can move again</button>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-title">Signals this session</div>
+    <div id="signalLog" style="font-size:14px;color:var(--text-dim);font-style:italic;">No signals yet. The ember is lit and quiet.</div>
+  </div>
+
+  <div class="card">
+    <div class="card-title">How to install the Ember in your engine</div>
+    <div style="font-size:14px;line-height:1.8;color:var(--text-dim);">
+      <p>The Ember must be persistently visible in both <code style="color:var(--gold);font-family:monospace;">admin/index.html</code> and <code style="color:var(--gold);font-family:monospace;">player/player.html</code>. Recommended implementation:</p>
+      <ul style="margin:12px 0 12px 24px;">
+        <li>A fixed-position candle glyph in the top-right of every view.</li>
+        <li>Click opens an overlay identical to this page's Ember overlay.</li>
+        <li>Any signal writes to a shared session store (<code style="color:var(--gold);font-family:monospace;">vg_signals</code> key) that both views poll.</li>
+        <li>Receiving a <strong>Snuff</strong> signal forcibly navigates both views to <code style="color:var(--gold);font-family:monospace;">pause.html#hearth</code>.</li>
+        <li>Receiving a <strong>Hold</strong> signal disables all branch buttons and narration inputs until released.</li>
+      </ul>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════════════════════════════ -->
+<!-- THE HEARTH — Post-session aftercare -->
+<!-- ══════════════════════════════════════════════════════════════ -->
+<div class="panel" id="panel-hearth">
+  <h2>The Hearth</h2>
+  <p class="section-sub">The scene has closed. The book is shut. But the fire still warms the stones. Walk the seven stations before the night ends.</p>
+
+  <div class="card emphasis" style="text-align:center;">
+    <div class="card-title">Station the First — Breath</div>
+    <div class="breath-ring" id="breathRing">Breathe</div>
+    <p style="font-size:14px;color:var(--text-dim);font-style:italic;">Four rounds. In as the ring grows, out as it shrinks. The ring keeps time.</p>
+  </div>
+
+  <div class="card">
+    <div class="card-title">The Seven Stations</div>
+    <div id="stationList"></div>
+  </div>
+
+  <div class="card">
+    <div class="card-title">Body check — after the scene</div>
+    <p style="font-size:14px;color:var(--text-dim);margin-bottom:16px;">Same prompts as the Threshold. Notice what moved.</p>
+    <div class="slider-row">
+      <label>Tension</label>
+      <input type="range" min="1" max="10" value="5" id="postTension" oninput="this.nextElementSibling.textContent=this.value">
+      <span class="slider-val">5</span>
+    </div>
+    <div class="slider-row">
+      <label>Grounded</label>
+      <input type="range" min="1" max="10" value="5" id="postGrounded" oninput="this.nextElementSibling.textContent=this.value">
+      <span class="slider-val">5</span>
+    </div>
+    <div class="slider-row">
+      <label>In my body</label>
+      <input type="range" min="1" max="10" value="5" id="postEmbodied" oninput="this.nextElementSibling.textContent=this.value">
+      <span class="slider-val">5</span>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-title">Two words — what the scene left me with</div>
+    <div class="flex" style="gap:10px;">
+      <input type="text" id="hearthWord1" placeholder="First word..." style="flex:1;min-width:180px;">
+      <input type="text" id="hearthWord2" placeholder="Second word..." style="flex:1;min-width:180px;">
+    </div>
+    <p style="font-size:13px;color:var(--text-muted);font-style:italic;margin-top:10px;">Dazed. Warm. Rattled. Wanting. Quiet. Seen. Raw. Held.</p>
+  </div>
+
+  <div class="card">
+    <div class="card-title">Offer — what I have capacity for</div>
+    <div class="tag-row" id="offerTags"></div>
+    <textarea id="offerNotes" placeholder="Anything else I want to say before we seal the book..." style="margin-top:14px;"></textarea>
+  </div>
+
+  <div class="seal">
+    <p>What was bound here is bound well.<br>
+    What was barred here is barred wholly.<br>
+    The ember is snuffed. The book is closed.<br>
+    We leave the scene on the page where it lives.</p>
+    <button class="btn btn-gold" onclick="sealHearth()">✦ Seal the Book</button>
+  </div>
+
+  <h3 style="margin-top:40px;">Resources — when the Grimoire is the wrong book</h3>
+  <p style="font-size:14px;color:var(--text-dim);font-style:italic;margin-bottom:18px;">The Grimoire is a game. It is not a therapist. When a session surfaces material that the game cannot hold, these are the books you want instead.</p>
+
+  <div class="resource-grid">
+    <div class="resource">
+      <strong>Crisis — U.S.</strong>
+      988 Suicide & Crisis Lifeline — call or text 988
+      <div class="meta">24/7. Free. Confidential.</div>
+    </div>
+    <div class="resource">
+      <strong>Crisis — International</strong>
+      findahelpline.com — directory by country
+      <div class="meta">Vetted helplines worldwide.</div>
+    </div>
+    <div class="resource">
+      <strong>Grounding technique</strong>
+      5–4–3–2–1: name five things you see, four you can touch, three you hear, two you smell, one you taste.
+      <div class="meta">Brings the body back into the room.</div>
+    </div>
+    <div class="resource">
+      <strong>Trauma-informed therapist</strong>
+      Psychology Today directory — filter by "trauma" and your region
+      <div class="meta">Look for EMDR, IFS, or Somatic Experiencing credentials.</div>
+    </div>
+    <div class="resource">
+      <strong>Sexual trauma support — U.S.</strong>
+      RAINN — 1-800-656-4673
+      <div class="meta">Confidential. 24/7.</div>
+    </div>
+    <div class="resource">
+      <strong>Local support plan</strong>
+      Add the local emergency, crisis, or trusted support contact that fits the people at your table before private play.
+      <div class="meta">Keep this list tuned to the players using this copy.</div>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════════════════════════════ -->
+<!-- THE COMPACT — Summary / reading surface -->
+<!-- ══════════════════════════════════════════════════════════════ -->
+<div class="panel" id="panel-compact">
+  <h2>The Compact</h2>
+  <p class="section-sub">The short reading. The full text lives in <code style="color:var(--gold);font-family:monospace;">SAFETY.md</code>. Read this before play. Read it again when something drifts.</p>
+
+  <blockquote>
+    Before the candle is lit, before the page is turned, before the first roll clatters upon the table — speak the compact. What is binding between us here, and what is barred.
+  </blockquote>
+
+  <h3>The Ember</h3>
+  <p>At every moment of play, the ember is lit. Either player may snuff it. Three tiers: <strong style="color:var(--dim);">Dim</strong> (softer), <strong style="color:var(--hold);">Hold</strong> (pause), <strong style="color:var(--snuff);">Snuff</strong> (close the book). The signal is never questioned in the moment.</p>
+
+  <h3>The Threshold</h3>
+  <p>No scene begins without it. Body, bandwidth, green, yellow, red, aftercare. Both players speak to all six. Answers are visible to each other. The DM updates the scene queue accordingly.</p>
+
+  <h3>The Banished Names</h3>
+  <p>Hard limits. Never on the page — not off-screen, not implied, not metaphorical. Stored on the protagonist. Any scene tag matching a Banished Name is refused by the engine.</p>
+
+  <h3>Hallowed and Veiled Ground</h3>
+  <p><strong>Hallowed:</strong> exists in the lore, never narrated on screen. <strong>Veiled:</strong> narrated impressionistically, camera turned away. <strong>Open:</strong> full narration permitted.</p>
+
+  <h3>The Fourth Response</h3>
+  <p>The engine offers Fight / Flight / Fawn / Freeze. <strong>Fawn</strong> covers appeasement, tactical yielding, and survival through agreement; it is authored with the same weight as the other responses.</p>
+
+  <h3>The Hearth</h3>
+  <p>Seven stations: breath, body check, water, name the room, two words, offer, seal. Minimum five minutes. Unconditional after a Snuff. The session is not over until the seal.</p>
+
+  <h3>Pacing</h3>
+  <p>First session of a new campaign: no <em>explicit</em> or <em>visceral</em> scenes. One <em>visceral</em> scene per session at most. Don't end on a visceral scene. When life is bad outside the Grimoire, play smaller.</p>
+
+  <div style="margin-top:32px;text-align:center;">
+    <a class="btn btn-gold" href="./SAFETY.md" target="_blank">📜 Read the Full Compact</a>
+  </div>
+</div>
+
+</div>
+
+<!-- Ember overlay -->
+<div class="ember-overlay" id="emberOverlay">
+  <div class="ember-overlay-inner">
+    <div class="big-candle">🕯️</div>
+    <h2 id="emberOverlayTitle">The Ember is Lit</h2>
+    <p id="emberOverlayBody">Choose a watch. The narrative pauses until you return.</p>
+    <div class="ember-grid" style="margin-top:28px;">
+      <button class="ember-btn ember-dim" onclick="sendSignal('dim'); closeEmberOverlay();">
+        <span class="glyph">🟡</span>
+        <span class="label">Dim</span>
+        <span class="desc">Softer. Ease this beat.</span>
+      </button>
+      <button class="ember-btn ember-hold" onclick="sendSignal('hold'); closeEmberOverlay();">
+        <span class="glyph">🟠</span>
+        <span class="label">Hold</span>
+        <span class="desc">Pause. I need a breath.</span>
+      </button>
+      <button class="ember-btn ember-snuff" onclick="sendSignal('snuff'); goToHearth();">
+        <span class="glyph">🔴</span>
+        <span class="label">Snuff</span>
+        <span class="desc">End the scene now.</span>
+      </button>
+    </div>
+    <div style="margin-top:28px;">
+      <button class="btn btn-gold" onclick="sendSignal('resume'); closeEmberOverlay();" style="margin-right:8px;">✅ Resume the Page</button>
+      <button class="btn btn-ghost" onclick="closeEmberOverlay()">Return to the page</button>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script src="engine/sync.js"></script>
+<script>
+// ── Tab switching ─────────────────────────────────────────────────
+function showTab(name) {
+  document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+  document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
+  document.querySelector(`.tab[data-tab="${name}"]`).classList.add('active');
+  document.getElementById(`panel-${name}`).classList.add('active');
+  history.replaceState(null, '', '#' + name);
+}
+// Deep link support
+if (location.hash) {
+  const h = location.hash.replace('#','');
+  if (['threshold','ember','hearth','compact'].includes(h)) showTab(h);
+}
+
+// ── Aftercare tags ────────────────────────────────────────────────
+const aftercareOptions = ['quiet', 'food', 'touch', 'held', 'solitude', 'talk', 'sleep', 'water', 'nothing yet', 'check in tomorrow'];
+const selectedAftercare = new Set();
+function renderAftercare() {
+  const row = document.getElementById('aftercareTags');
+  row.innerHTML = aftercareOptions.map(o =>
+    `<span class="pill ${selectedAftercare.has(o) ? 'active' : ''}" onclick="toggleAftercare('${o}')">${o}</span>`
+  ).join('');
+}
+function toggleAftercare(opt) {
+  selectedAftercare.has(opt) ? selectedAftercare.delete(opt) : selectedAftercare.add(opt);
+  renderAftercare();
+}
+
+// ── Offer tags (Hearth) ──────────────────────────────────────────
+const offerOptions = ['hold me', 'leave me be', 'talk', 'eat', 'sleep', 'water', 'walk', 'shower', 'cuddle', 'nothing'];
+const selectedOffer = new Set();
+function renderOffer() {
+  const row = document.getElementById('offerTags');
+  row.innerHTML = offerOptions.map(o =>
+    `<span class="pill ${selectedOffer.has(o) ? 'active' : ''}" onclick="toggleOffer('${o}')">${o}</span>`
+  ).join('');
+}
+function toggleOffer(opt) {
+  selectedOffer.has(opt) ? selectedOffer.delete(opt) : selectedOffer.add(opt);
+  renderOffer();
+}
+
+// ── Threshold save/load ───────────────────────────────────────────
+function saveThreshold() {
+  const data = {
+    playerName: document.getElementById('thPlayerName').value.trim(),
+    playerRole: document.getElementById('thPlayerRole').value,
+    body: {
+      tension: +document.getElementById('bodyTension').value,
+      fatigue: +document.getElementById('bodyFatigue').value,
+      hunger: +document.getElementById('bodyHunger').value,
+      pain: +document.getElementById('bodyPain').value,
+    },
+    bandwidth: +document.getElementById('bandwidth').value,
+    green: document.getElementById('greenText').value.trim(),
+    yellow: document.getElementById('yellowText').value.trim(),
+    red: document.getElementById('redText').value.trim(),
+    aftercare: [...selectedAftercare],
+    sealedAt: new Date().toISOString(),
+  };
+  try {
+    const existing = JSON.parse(localStorage.getItem('vg_thresholds') || '[]');
+    existing.push(data);
+    localStorage.setItem('vg_thresholds', JSON.stringify(existing.slice(-20)));
+    localStorage.setItem('vg_threshold_current', JSON.stringify(data));
+  } catch (e) {}
+  renderThresholdSummary(data);
+  toast('The Threshold is sealed.');
+}
+function renderThresholdSummary(data) {
+  const el = document.getElementById('thresholdSummary');
+  const body = document.getElementById('thresholdSummaryBody');
+  const bw = data.bandwidth;
+  const bwLabel = bw <= 3 ? 'candle-stub' : bw <= 6 ? 'lantern' : bw <= 8 ? 'hearth-fire' : 'bonfire';
+  body.innerHTML = `
+    <p style="margin-bottom:12px;"><strong style="color:var(--gold);font-family:'Cinzel',serif;letter-spacing:2px;">${data.playerName || 'The Player'}</strong> — ${data.playerRole.toUpperCase()}</p>
+    <p style="font-size:14px;color:var(--text-dim);"><strong style="color:var(--text);">Bandwidth:</strong> ${bw}/10 (${bwLabel})</p>
+    <p style="font-size:14px;color:var(--text-dim);"><strong style="color:var(--text);">Body:</strong> tension ${data.body.tension} · fatigue ${data.body.fatigue} · hunger ${data.body.hunger} · pain ${data.body.pain}</p>
+    ${data.green ? `<p style="margin-top:10px;font-size:14px;"><strong style="color:#9edc9e;font-family:'Cinzel',serif;letter-spacing:1px;">GREEN —</strong> <em style="color:var(--text-dim);">${escapeHtml(data.green)}</em></p>` : ''}
+    ${data.yellow ? `<p style="font-size:14px;"><strong style="color:#e8b84a;font-family:'Cinzel',serif;letter-spacing:1px;">YELLOW —</strong> <em style="color:var(--text-dim);">${escapeHtml(data.yellow)}</em></p>` : ''}
+    ${data.red ? `<p style="font-size:14px;"><strong style="color:#ff8070;font-family:'Cinzel',serif;letter-spacing:1px;">RED —</strong> <em style="color:var(--text-dim);">${escapeHtml(data.red)}</em></p>` : ''}
+    ${data.aftercare.length ? `<p style="margin-top:10px;font-size:14px;"><strong style="color:var(--gold);font-family:'Cinzel',serif;letter-spacing:1px;">AFTERCARE —</strong> <span style="color:var(--text-dim);">${data.aftercare.join(' · ')}</span></p>` : ''}
+  `;
+  el.style.display = '';
+  el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+function editThreshold() {
+  document.getElementById('thresholdSummary').style.display = 'none';
+}
+function clearThreshold() {
+  if (!confirm('Clear the Threshold form?')) return;
+  ['thPlayerName','greenText','yellowText','redText','hearthWord1','hearthWord2','offerNotes'].forEach(id => {
+    const el = document.getElementById(id); if (el) el.value = '';
+  });
+  ['bodyTension','bodyFatigue','bodyHunger','bodyPain','bandwidth'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) { el.value = el.id === 'bandwidth' ? 6 : (id === 'bodyHunger' ? 3 : (id === 'bodyPain' ? 2 : 5)); el.dispatchEvent(new Event('input')); }
+  });
+  selectedAftercare.clear();
+  renderAftercare();
+  document.getElementById('thresholdSummary').style.display = 'none';
+}
+
+// ── Ember signals ─────────────────────────────────────────────────
+function sendSignal(tier) {
+  const entry = { tier, at: new Date().toISOString() };
+  try {
+    const log = JSON.parse(localStorage.getItem('vg_signals') || '[]');
+    log.push(entry);
+    localStorage.setItem('vg_signals', JSON.stringify(log.slice(-50)));
+  } catch(e) {}
+  renderSignalLog();
+  const labels = {
+    dim: '🟡 Dim — softer on this beat',
+    hold: '🟠 Hold — pause, breath',
+    snuff: '🔴 Snuff — the book is closed',
+    veil: '🌫️ Veil — camera turned away',
+    stoke: '🔥 Stoke — go further',
+    rewrite: '✍️ Rewrite — take the beat back',
+    resume: '✅ Resume — the page can move again',
+  };
+  toast(labels[tier] || 'Signal sent');
+  if (tier === 'snuff') setTimeout(goToHearth, 900);
+}
+function renderSignalLog() {
+  const el = document.getElementById('signalLog');
+  if (!el) return;
+  let log = [];
+  try { log = JSON.parse(localStorage.getItem('vg_signals') || '[]'); } catch(e) {}
+  if (!log.length) {
+    el.innerHTML = 'No signals yet. The ember is lit and quiet.';
+    return;
+  }
+  const labels = { dim:'🟡 Dim', hold:'🟠 Hold', snuff:'🔴 Snuff', veil:'🌫️ Veil', stoke:'🔥 Stoke', rewrite:'✍️ Rewrite', resume:'✅ Resume' };
+  el.innerHTML = log.slice().reverse().map(e => {
+    const t = new Date(e.at);
+    return `<div style="padding:6px 0;border-bottom:1px solid var(--border);">${labels[e.tier] || e.tier} — <span style="color:var(--text-muted);">${t.toLocaleTimeString()}</span></div>`;
+  }).join('');
+}
+
+// ── Ember overlay ─────────────────────────────────────────────────
+function openEmberOverlay() {
+  document.getElementById('emberOverlay').classList.add('open');
+}
+function closeEmberOverlay() {
+  document.getElementById('emberOverlay').classList.remove('open');
+}
+function goToHearth() {
+  closeEmberOverlay();
+  showTab('hearth');
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+}
+
+// ── Hearth stations ───────────────────────────────────────────────
+const stations = [
+  { t: 'I. Breath', d: 'Four slow rounds. Four in, six out. Let the ring above keep time.' },
+  { t: 'II. Body check', d: 'Revisit the sliders below. Notice what has moved since the Threshold.' },
+  { t: 'III. Water', d: 'Both players drink. Actual water. Right now.' },
+  { t: 'IV. Name the room', d: 'Aloud: "I am [name]. The year is 2026. I am in [room]. The person across from me is [name]."' },
+  { t: 'V. Two words', d: 'Each player offers two words — no more, no fewer — for what the scene left them with.' },
+  { t: 'VI. Offer', d: 'Each player offers what they have capacity for. The other accepts, declines, or counter-offers.' },
+  { t: 'VII. Seal', d: 'Close the Grimoire with intention. A breath, a bow, a kiss — whatever closer you chose at campaign creation.' },
+];
+function renderStations() {
+  const el = document.getElementById('stationList');
+  if (!el) return;
+  let done = [];
+  try { done = JSON.parse(localStorage.getItem('vg_stations_done') || '[]'); } catch(e) {}
+  el.innerHTML = stations.map((s, i) => `
+    <div class="station ${done.includes(i) ? 'done' : ''}" onclick="toggleStation(${i})">
+      <div class="station-check">✓</div>
+      <div class="station-body">
+        <div class="station-title">${s.t}</div>
+        <div class="station-desc">${s.d}</div>
+      </div>
+    </div>
+  `).join('');
+}
+function toggleStation(i) {
+  let done = [];
+  try { done = JSON.parse(localStorage.getItem('vg_stations_done') || '[]'); } catch(e) {}
+  if (done.includes(i)) done = done.filter(x => x !== i);
+  else done.push(i);
+  localStorage.setItem('vg_stations_done', JSON.stringify(done));
+  renderStations();
+}
+
+function sealHearth() {
+  const data = {
+    post: {
+      tension: +document.getElementById('postTension').value,
+      grounded: +document.getElementById('postGrounded').value,
+      embodied: +document.getElementById('postEmbodied').value,
+    },
+    words: [
+      document.getElementById('hearthWord1').value.trim(),
+      document.getElementById('hearthWord2').value.trim(),
+    ].filter(Boolean),
+    offer: [...selectedOffer],
+    notes: document.getElementById('offerNotes').value.trim(),
+    sealedAt: new Date().toISOString(),
+  };
+  try {
+    const existing = JSON.parse(localStorage.getItem('vg_hearths') || '[]');
+    existing.push(data);
+    localStorage.setItem('vg_hearths', JSON.stringify(existing.slice(-20)));
+  } catch(e) {}
+  // Clear stations so the next session starts fresh
+  localStorage.removeItem('vg_stations_done');
+  renderStations();
+  toast('The book is sealed. Be gentle with each other.');
+}
+
+// ── Toast ─────────────────────────────────────────────────────────
+let toastTimer;
+function toast(msg) {
+  const el = document.getElementById('toast');
+  el.textContent = msg;
+  el.classList.add('show');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => el.classList.remove('show'), 3200);
+}
+
+// ── Utils ─────────────────────────────────────────────────────────
+function escapeHtml(s) {
+  return s.replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+// ── Keyboard: Escape opens Ember, Esc-Esc goes to Hearth ──────────
+let lastEsc = 0;
+window.addEventListener('keydown', e => {
+  if (e.key === 'Escape') {
+    const overlay = document.getElementById('emberOverlay');
+    const now = Date.now();
+    if (overlay.classList.contains('open')) {
+      closeEmberOverlay();
+    } else if (now - lastEsc < 600) {
+      goToHearth();
+    } else {
+      openEmberOverlay();
+    }
+    lastEsc = now;
+  }
+});
+
+// ── Init ──────────────────────────────────────────────────────────
+renderAftercare();
+renderOffer();
+renderSignalLog();
+renderStations();
+if (window.VGSync) {
+  VGSync.start({
+    onApply: () => {
+      renderSignalLog();
+      renderStations();
+    },
+  });
+}
+</script>
+</body>
+</html>
