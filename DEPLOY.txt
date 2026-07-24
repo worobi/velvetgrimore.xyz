@@ -41,6 +41,20 @@ Then open:
 
 REMOTE MULTIPLAYER ON VPS
 
+Coolify:
+
+  Deploy this repo as a Dockerfile app.
+  Container port: 80
+  Public domains: velvetgrimore.xyz, www.velvetgrimore.xyz, vg.highfunctioningchaos.living
+
+The included Dockerfile runs:
+
+  node server.js
+
+with PORT=80 inside the container.
+
+Direct VPS:
+
 Copy this entire folder to:
 
   /var/www/velvetgrimore

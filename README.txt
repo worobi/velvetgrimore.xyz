@@ -11,9 +11,9 @@ QUICK START
 7. After the final scene, use pause.html -> Hearth to close the session.
 
 VPS BACKEND MODE
-1. Copy the whole folder to the VPS.
-2. Run `node server.js` or install the included systemd service.
-3. Point nginx at the Node service so `/` and `/api/` share the same domain.
+1. Copy the whole folder to the VPS, or deploy the repo through Coolify using the included Dockerfile.
+2. Run `node server.js`, install the included systemd service, or let Docker run `node server.js` on PORT=80.
+3. Point the domain/proxy at the Node service so `/` and `/api/` share the same domain.
 4. In Admin -> Settings -> Remote Multiplayer, create a table code.
 5. Send the code to the player.
 
@@ -31,6 +31,7 @@ WHAT IS INCLUDED
 - engine/intimacy.js: scene chat, consent ceiling, heat, prompt, and want/boundary card layer
 - server.js: Node backend for static hosting and remote table sync
 - package.json: npm start entrypoint for the backend
+- Dockerfile: Coolify/container entrypoint for the backend
 - deploy/velvetgrimore.service: systemd service template
 - deploy/nginx-velvetgrimore.conf: nginx reverse-proxy template
 - pause.html: Threshold, Ember, Hearth, and Compact surface
