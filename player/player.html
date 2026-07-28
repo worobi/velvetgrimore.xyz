@@ -356,7 +356,7 @@ textarea.npc-response:focus { border-color: var(--border-hot); }
 
   <div id="mainContent"></div>
   <div class="remote-join" id="playerRemoteChatDock" style="margin-top:22px;">
-    <div style="font-family:'Cinzel',serif;color:var(--gold);font-size:14px;letter-spacing:1px;margin-bottom:6px;">Table Chat</div>
+    <div style="font-family:'Cinzel',serif;color:var(--gold);font-size:14px;letter-spacing:1px;margin-bottom:6px;">Live Table</div>
     <div id="playerSyncStatus" style="font-size:13px;color:var(--text-muted);margin-bottom:10px;"></div>
     <div class="summary-grid" style="margin-bottom:12px;">
       <div class="summary-card">
@@ -391,6 +391,16 @@ textarea.npc-response:focus { border-color: var(--border-hot); }
     </div>
     <div style="font-family:'Cinzel',serif;color:var(--gold);font-size:12px;letter-spacing:1px;text-transform:uppercase;margin-bottom:8px;">My Request Tracker</div>
     <div id="playerRequestTracker" style="display:grid;gap:8px;max-height:180px;overflow:auto;background:rgba(0,0,0,0.18);border:1px solid var(--border);border-radius:6px;padding:10px;margin-bottom:12px;"></div>
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:12px;margin-bottom:12px;">
+      <div>
+        <div style="font-family:'Cinzel',serif;color:var(--gold);font-size:12px;letter-spacing:1px;text-transform:uppercase;margin-bottom:8px;">Prompt Inbox</div>
+        <div id="playerPromptInbox" style="display:grid;gap:8px;max-height:220px;overflow:auto;background:rgba(0,0,0,0.18);border:1px solid var(--border);border-radius:6px;padding:10px;"></div>
+      </div>
+      <div>
+        <div style="font-family:'Cinzel',serif;color:var(--gold);font-size:12px;letter-spacing:1px;text-transform:uppercase;margin-bottom:8px;">Handouts</div>
+        <div id="playerHandouts" style="display:grid;gap:8px;max-height:220px;overflow:auto;background:rgba(0,0,0,0.18);border:1px solid var(--border);border-radius:6px;padding:10px;"></div>
+      </div>
+    </div>
     <div style="font-family:'Cinzel',serif;color:var(--gold);font-size:12px;letter-spacing:1px;text-transform:uppercase;margin-bottom:8px;">Activity Feed</div>
     <div id="playerEventRail" style="display:grid;gap:8px;max-height:220px;overflow:auto;background:rgba(0,0,0,0.18);border:1px solid var(--border);border-radius:6px;padding:10px;margin-bottom:12px;"></div>
     <div style="display:flex;justify-content:space-between;gap:10px;align-items:center;margin-bottom:10px;">
@@ -665,12 +675,15 @@ function initRemoteSync() {
     onChat: renderPlayerChat,
     onEvents: renderPlayerEvents,
     onCheckpoints: () => renderPlayerLiveSummary(VGSync.status()),
+    onFlow: renderPlayerFlow,
     onError: err => updatePlayerSyncStatus({ ...VGSync.status(), error: err.message }),
   });
   updatePlayerSyncStatus(VGSync.status());
   renderPlayerChat(VGSync.status().messages || []);
   renderPlayerEvents(VGSync.status().events || []);
+  renderPlayerFlow(VGSync.status());
   if (VGSync.status().enabled) VGSync.fetchCheckpoints().catch(() => null);
+  if (VGSync.status().enabled) VGSync.fetchFlow().catch(() => null);
 }
 
 function updatePlayerSyncStatus(status = (window.VGSync ? VGSync.status() : null)) {
@@ -745,6 +758,47 @@ function renderPlayerLobby(table = (window.VGSync ? VGSync.status().table : null
       <div style="font-size:12px;color:${player.ready ? 'var(--gold)' : 'var(--text-muted)'};">${player.ready ? 'ready' : 'not ready'}${player.role === 'warden' ? ' · controls state' : ''}</div>
     </div>
   `).join('');
+  renderPlayerFlow(window.VGSync ? VGSync.status() : null);
+}
+
+function renderPlayerFlow(state = (window.VGSync ? VGSync.status() : null)) {
+  const prompts = state?.prompts || [];
+  const handouts = state?.handouts || [];
+  const promptEl = document.getElementById('playerPromptInbox');
+  const handoutEl = document.getElementById('playerHandouts');
+  if (promptEl) {
+    const visible = prompts.slice(0, 12);
+    promptEl.innerHTML = visible.length ? visible.map(prompt => {
+      const open = prompt.status === 'open';
+      const time = prompt.createdAt ? new Date(prompt.createdAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }) : '';
+      return `
+        <div style="border-bottom:1px solid rgba(255,255,255,0.04);padding-bottom:8px;">
+          <div style="display:flex;justify-content:space-between;gap:8px;font-size:12px;color:var(--text-muted);">
+            <span><strong style="color:${open ? 'var(--gold)' : '#9edc9e'};">${escapeHtml(prompt.status || 'open')}</strong> · ${escapeHtml(prompt.kind || 'prompt')}</span>
+            <span>${escapeHtml(time)}</span>
+          </div>
+          <div style="font-size:14px;color:var(--text-dim);line-height:1.45;margin-top:3px;">${escapeHtml(prompt.question || '')}</div>
+          ${prompt.response ? `<div style="font-size:13px;color:var(--text);line-height:1.45;margin-top:5px;">You: ${escapeHtml(prompt.response)}</div>` : ''}
+          ${open ? `
+            <div style="display:grid;gap:6px;margin-top:8px;">
+              <input type="text" id="playerPromptResponse${prompt.id}" placeholder="Answer the prompt...">
+              <button class="btn btn-purple" style="padding:7px 10px;font-size:11px;" onclick="answerPlayerPrompt(${prompt.id})">Send Response</button>
+            </div>
+          ` : ''}
+        </div>
+      `;
+    }).join('') : `<div style="font-size:12px;color:var(--text-muted);font-style:italic;">No prompts waiting.</div>`;
+  }
+  if (handoutEl) {
+    const visible = handouts.slice(0, 10);
+    handoutEl.innerHTML = visible.length ? visible.map(handout => `
+      <div style="border-bottom:1px solid rgba(255,255,255,0.04);padding-bottom:8px;">
+        <div style="font-size:12px;color:var(--text-muted);"><strong style="color:var(--text);">${escapeHtml(handout.title || 'Handout')}</strong> · ${escapeHtml(handout.kind || 'note')}</div>
+        <div style="font-size:14px;color:var(--text-dim);line-height:1.45;margin-top:3px;white-space:pre-wrap;">${escapeHtml(handout.text || '')}</div>
+      </div>
+    `).join('') : `<div style="font-size:12px;color:var(--text-muted);font-style:italic;">No handouts revealed yet.</div>`;
+  }
+  renderPlayerLiveSummary(window.VGSync ? VGSync.status() : null);
 }
 
 function playerSnapshotSummary() {
@@ -836,6 +890,10 @@ function playerEventLabel(event) {
     'checkpoint.created': 'Checkpoint',
     'checkpoint.restored': 'Restore',
     'checkpoint.deleted': 'Checkpoint',
+    'focus.changed': 'Spotlight',
+    'prompt.sent': 'Prompt',
+    'prompt.responded': 'Response',
+    'handout.sent': 'Handout',
     'dice.roll': 'Roll',
     'scene.change': 'Scene',
     'safety.signal': 'Safety',
@@ -922,6 +980,7 @@ async function joinRemoteTableFromPlayer() {
     await VGSync.fetchMessages(true);
     await VGSync.fetchEvents(true);
     await VGSync.fetchCheckpoints();
+    await VGSync.fetchFlow();
     VGEngine.resumeSession();
     refreshView();
   } catch (err) {
@@ -937,6 +996,7 @@ async function playerRefreshLobby() {
     await VGSync.fetchMessages(true);
     await VGSync.fetchEvents(true);
     await VGSync.fetchCheckpoints();
+    await VGSync.fetchFlow();
     renderPlayerLobby(table);
     updatePlayerSyncStatus(VGSync.status());
   } catch (err) {
@@ -970,6 +1030,21 @@ async function playerSendChat() {
   } catch (err) {
     updatePlayerSyncStatus({ ...VGSync.status(), error: err.message });
     showToast(`Chat failed: ${err.message}`);
+  }
+}
+
+async function answerPlayerPrompt(promptId) {
+  if (!window.VGSync) return;
+  const input = document.getElementById(`playerPromptResponse${promptId}`);
+  const response = input?.value || '';
+  if (!response.trim()) return;
+  try {
+    await VGSync.respondPrompt(promptId, response);
+    renderPlayerFlow(VGSync.status());
+    showToast('Prompt response sent.');
+  } catch (err) {
+    updatePlayerSyncStatus({ ...VGSync.status(), error: err.message });
+    showToast(`Prompt failed: ${err.message}`);
   }
 }
 

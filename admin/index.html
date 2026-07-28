@@ -743,7 +743,41 @@ hr.divider { border: none; border-top: 1px solid var(--border); margin: 24px 0; 
       </div>
       <div id="syncStatus" style="font-size:13px;color:var(--text-dim);line-height:1.7;margin-top:12px;">Remote sync is off.</div>
       <div id="syncLobby" style="display:grid;gap:8px;margin-top:12px;"></div>
-      <div style="margin-top:14px;border-top:1px solid var(--border);padding-top:12px;">
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(290px,1fr));gap:12px;margin-top:14px;align-items:start;">
+      <div style="border-top:1px solid var(--border);padding-top:12px;">
+        <div style="font-family:'Cinzel',serif;color:var(--gold);font-size:12px;letter-spacing:1px;text-transform:uppercase;margin-bottom:8px;">Table Flow</div>
+        <div id="syncFlowSummary" style="font-size:13px;color:var(--text-dim);line-height:1.6;margin-bottom:8px;">No spotlight set.</div>
+        <div style="display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:8px;margin-bottom:8px;">
+          <select id="syncFocusTarget"></select>
+          <input type="text" id="syncFocusNote" placeholder="Spotlight note...">
+        </div>
+        <div class="flex gap-8" style="flex-wrap:wrap;margin-bottom:10px;">
+          <button class="btn btn-gold btn-sm" onclick="setSyncFocus()">Set Spotlight</button>
+          <button class="btn btn-ghost btn-sm" onclick="clearSyncFocus()">Clear</button>
+        </div>
+        <div style="display:grid;gap:8px;margin-bottom:10px;">
+          <select id="syncPromptTarget"></select>
+          <div style="display:grid;grid-template-columns:minmax(0,1fr) 120px;gap:8px;">
+            <input type="text" id="syncPromptText" placeholder="Prompt players for a choice, roll, or action...">
+            <select id="syncPromptKind">
+              <option value="freeform">Freeform</option>
+              <option value="choice">Choice</option>
+              <option value="roll">Roll</option>
+              <option value="action">Action</option>
+            </select>
+          </div>
+          <button class="btn btn-gold btn-sm" onclick="sendSyncPrompt()">Send Prompt</button>
+        </div>
+        <div id="syncPromptList" style="display:grid;gap:8px;max-height:190px;overflow:auto;background:rgba(0,0,0,0.18);border:1px solid var(--border);border-radius:6px;padding:10px;margin-bottom:10px;"></div>
+        <div style="display:grid;gap:8px;">
+          <select id="syncHandoutTarget"></select>
+          <input type="text" id="syncHandoutTitle" placeholder="Handout title...">
+          <textarea id="syncHandoutText" rows="3" placeholder="Clue, note, image link, or private detail..."></textarea>
+          <button class="btn btn-ghost btn-sm" onclick="sendSyncHandout()">Send Handout</button>
+          <div id="syncHandoutList" style="display:grid;gap:8px;max-height:160px;overflow:auto;background:rgba(0,0,0,0.18);border:1px solid var(--border);border-radius:6px;padding:10px;"></div>
+        </div>
+      </div>
+      <div style="border-top:1px solid var(--border);padding-top:12px;">
         <div style="display:flex;justify-content:space-between;gap:10px;align-items:center;margin-bottom:8px;">
           <div style="font-family:'Cinzel',serif;color:var(--gold);font-size:12px;letter-spacing:1px;text-transform:uppercase;">Session Checkpoints</div>
           <button class="btn btn-ghost btn-sm" onclick="refreshSyncCheckpoints()">Refresh</button>
@@ -756,13 +790,14 @@ hr.divider { border: none; border-top: 1px solid var(--border); margin: 24px 0; 
         </div>
         <div id="syncCheckpointList" style="display:grid;gap:8px;max-height:220px;overflow:auto;background:rgba(0,0,0,0.18);border:1px solid var(--border);border-radius:6px;padding:10px;"></div>
       </div>
-      <div style="margin-top:14px;border-top:1px solid var(--border);padding-top:12px;">
+      <div style="border-top:1px solid var(--border);padding-top:12px;">
         <div style="font-family:'Cinzel',serif;color:var(--gold);font-size:12px;letter-spacing:1px;text-transform:uppercase;margin-bottom:8px;">Warden Action Queue</div>
         <div id="syncActionQueue" style="display:grid;gap:8px;background:rgba(0,0,0,0.18);border:1px solid var(--border);border-radius:6px;padding:10px;"></div>
       </div>
-      <div style="margin-top:14px;border-top:1px solid var(--border);padding-top:12px;">
+      <div style="border-top:1px solid var(--border);padding-top:12px;">
         <div style="font-family:'Cinzel',serif;color:var(--gold);font-size:12px;letter-spacing:1px;text-transform:uppercase;margin-bottom:8px;">Activity Feed</div>
         <div id="syncEventRail" style="display:grid;gap:8px;max-height:260px;overflow:auto;background:rgba(0,0,0,0.18);border:1px solid var(--border);border-radius:6px;padding:10px;"></div>
+      </div>
       </div>
       <div style="margin-top:14px;border-top:1px solid var(--border);padding-top:12px;">
         <div style="font-family:'Cinzel',serif;color:var(--gold);font-size:12px;letter-spacing:1px;text-transform:uppercase;margin-bottom:8px;">Session Timeline</div>
@@ -1267,6 +1302,7 @@ function initRemoteSync() {
     onChat: renderSyncChat,
     onEvents: renderSyncEvents,
     onCheckpoints: renderSyncCheckpoints,
+    onFlow: renderSyncFlow,
     onError: err => updateSyncStatus({ ...VGSync.status(), error: err.message }),
   });
   updateSyncStatus(VGSync.status());
@@ -1274,6 +1310,7 @@ function initRemoteSync() {
   renderSyncChat(cfg.messages || []);
   renderSyncEvents(cfg.events || []);
   renderSyncCheckpoints(cfg.checkpoints || []);
+  renderSyncFlow(cfg.flow || null);
 }
 
 function updateSyncStatus(status = (window.VGSync ? VGSync.status() : null)) {
@@ -1309,6 +1346,64 @@ function renderSyncLobby(table = (window.VGSync ? VGSync.status().table : null))
       <div style="font-size:12px;color:${player.ready ? 'var(--gold)' : 'var(--text-muted)'};">${player.ready ? 'ready' : 'not ready'}${player.role === 'warden' ? ' · controls state' : ''}</div>
     </div>
   `).join('');
+  renderSyncFlow(window.VGSync ? VGSync.status() : null);
+}
+
+function syncTargetOptions(selected = '') {
+  const players = window.VGSync ? (VGSync.status().players || VGSync.status().table?.players || []) : [];
+  const options = [`<option value="all"${selected === 'all' || !selected ? ' selected' : ''}>All players</option>`];
+  players.filter(player => player.role !== 'warden').forEach(player => {
+    options.push(`<option value="${escHtml(player.id)}"${selected === player.id ? ' selected' : ''}>${escHtml(player.name || 'Seated Player')}</option>`);
+  });
+  return options.join('');
+}
+
+function renderSyncFlow(state = (window.VGSync ? VGSync.status() : null)) {
+  const status = window.VGSync ? VGSync.status() : null;
+  const flow = state?.flow || status?.flow || {};
+  const prompts = state?.prompts || status?.prompts || [];
+  const handouts = state?.handouts || status?.handouts || [];
+  const summary = document.getElementById('syncFlowSummary');
+  const focusTarget = document.getElementById('syncFocusTarget');
+  const promptTarget = document.getElementById('syncPromptTarget');
+  const handoutTarget = document.getElementById('syncHandoutTarget');
+  const promptList = document.getElementById('syncPromptList');
+  const handoutList = document.getElementById('syncHandoutList');
+  if (focusTarget) focusTarget.innerHTML = syncTargetOptions(flow.focusClientId || '');
+  if (promptTarget) promptTarget.innerHTML = syncTargetOptions(promptTarget.value || 'all');
+  if (handoutTarget) handoutTarget.innerHTML = syncTargetOptions(handoutTarget.value || 'all');
+  if (summary) {
+    summary.textContent = flow.focusClientId
+      ? `Spotlight: ${flow.focusName || 'Selected player'}${flow.focusNote ? ` - ${flow.focusNote}` : ''}`
+      : 'No spotlight set.';
+  }
+  if (promptList) {
+    const visible = (prompts || []).slice(0, 12);
+    promptList.innerHTML = visible.length ? visible.map(prompt => {
+      const answered = prompt.status === 'answered';
+      const time = prompt.createdAt ? new Date(prompt.createdAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }) : '';
+      return `
+        <div style="border-bottom:1px solid rgba(255,255,255,0.04);padding-bottom:8px;">
+          <div style="display:flex;justify-content:space-between;gap:8px;font-size:12px;color:var(--text-muted);">
+            <span><strong style="color:${answered ? '#9edc9e' : 'var(--gold)'};">${escHtml(prompt.status || 'open')}</strong> · ${escHtml(prompt.targetName || 'All players')}</span>
+            <span>${escHtml(time)}</span>
+          </div>
+          <div style="font-size:13px;color:var(--text-dim);line-height:1.45;margin-top:3px;">${escHtml(prompt.question || '')}</div>
+          ${answered ? `<div style="font-size:13px;color:var(--text);line-height:1.45;margin-top:5px;">${escHtml(prompt.respondedByName || 'Player')}: ${escHtml(prompt.response || '')}</div>` : ''}
+          ${prompt.status === 'open' ? `<button class="btn btn-ghost btn-sm" style="margin-top:7px;" onclick="closeSyncPrompt(${prompt.id})">Close</button>` : ''}
+        </div>
+      `;
+    }).join('') : `<div style="font-size:12px;color:var(--text-muted);font-style:italic;">No active prompts.</div>`;
+  }
+  if (handoutList) {
+    const visible = (handouts || []).slice(0, 8);
+    handoutList.innerHTML = visible.length ? visible.map(handout => `
+      <div style="border-bottom:1px solid rgba(255,255,255,0.04);padding-bottom:8px;">
+        <div style="font-size:12px;color:var(--text-muted);"><strong style="color:var(--text);">${escHtml(handout.title || 'Handout')}</strong> · ${escHtml(handout.targetName || 'All players')}</div>
+        <div style="font-size:13px;color:var(--text-dim);line-height:1.45;margin-top:3px;">${escHtml(handout.text || '')}</div>
+      </div>
+    `).join('') : `<div style="font-size:12px;color:var(--text-muted);font-style:italic;">No handouts sent yet.</div>`;
+  }
 }
 
 function renderAdminResumeSummary(status = (window.VGSync ? VGSync.status() : null)) {
@@ -1442,6 +1537,10 @@ function eventLabel(event) {
     'checkpoint.created': 'Checkpoint',
     'checkpoint.restored': 'Restore',
     'checkpoint.deleted': 'Checkpoint',
+    'focus.changed': 'Spotlight',
+    'prompt.sent': 'Prompt',
+    'prompt.responded': 'Response',
+    'handout.sent': 'Handout',
     'dice.roll': 'Roll',
     'scene.change': 'Scene',
     'safety.signal': 'Safety',
@@ -1482,6 +1581,10 @@ function timelineCategory(event) {
     'checkpoint.created': 'sync',
     'checkpoint.restored': 'sync',
     'checkpoint.deleted': 'sync',
+    'focus.changed': 'table',
+    'prompt.sent': 'table',
+    'prompt.responded': 'table',
+    'handout.sent': 'table',
     'dice.roll': 'roll',
     'scene.change': 'scene',
     'safety.signal': 'safety',
@@ -1655,6 +1758,7 @@ async function createRemoteTable() {
     await VGSync.fetchMessages(true);
     await VGSync.fetchEvents(true);
     await VGSync.fetchCheckpoints();
+    await VGSync.fetchFlow();
     toast(`Remote table created: ${result.table.code}`, 'success');
     updateSyncStatus(VGSync.status());
   } catch (err) {
@@ -1676,6 +1780,7 @@ async function joinRemoteTable() {
     await VGSync.fetchMessages(true);
     await VGSync.fetchEvents(true);
     await VGSync.fetchCheckpoints();
+    await VGSync.fetchFlow();
     toast(`Joined remote table: ${result.table.code}`, 'success');
     updateSyncStatus(VGSync.status());
   } catch (err) {
@@ -1691,6 +1796,7 @@ async function refreshLobby() {
     await VGSync.fetchMessages(true);
     await VGSync.fetchEvents(true);
     await VGSync.fetchCheckpoints();
+    await VGSync.fetchFlow();
     renderSyncLobby(table);
     updateSyncStatus(VGSync.status());
   } catch (err) {
@@ -1733,6 +1839,76 @@ async function refreshSyncCheckpoints() {
     renderSyncCheckpoints(VGSync.status().checkpoints);
   } catch (err) {
     toast(`Checkpoint refresh failed: ${err.message}`, 'error');
+  }
+}
+
+async function setSyncFocus() {
+  if (!window.VGSync) return;
+  try {
+    const target = document.getElementById('syncFocusTarget')?.value || '';
+    const note = document.getElementById('syncFocusNote')?.value || '';
+    await VGSync.setFocus(target === 'all' ? '' : target, note);
+    renderSyncFlow(VGSync.status());
+    toast(target && target !== 'all' ? 'Spotlight updated.' : 'Spotlight cleared.', 'success');
+  } catch (err) {
+    toast(`Spotlight failed: ${err.message}`, 'error');
+  }
+}
+
+async function clearSyncFocus() {
+  const note = document.getElementById('syncFocusNote');
+  const target = document.getElementById('syncFocusTarget');
+  if (note) note.value = '';
+  if (target) target.value = 'all';
+  await setSyncFocus();
+}
+
+async function sendSyncPrompt() {
+  if (!window.VGSync) return;
+  const input = document.getElementById('syncPromptText');
+  const question = input?.value || '';
+  if (!question.trim()) return;
+  try {
+    await VGSync.sendPrompt(question, {
+      target: document.getElementById('syncPromptTarget')?.value || 'all',
+      kind: document.getElementById('syncPromptKind')?.value || 'freeform',
+    });
+    if (input) input.value = '';
+    renderSyncFlow(VGSync.status());
+    toast('Prompt sent.', 'success');
+  } catch (err) {
+    toast(`Prompt failed: ${err.message}`, 'error');
+  }
+}
+
+async function closeSyncPrompt(promptId) {
+  if (!window.VGSync) return;
+  try {
+    await VGSync.closePrompt(promptId);
+    renderSyncFlow(VGSync.status());
+    toast('Prompt closed.', 'warn');
+  } catch (err) {
+    toast(`Prompt update failed: ${err.message}`, 'error');
+  }
+}
+
+async function sendSyncHandout() {
+  if (!window.VGSync) return;
+  const titleInput = document.getElementById('syncHandoutTitle');
+  const textInput = document.getElementById('syncHandoutText');
+  const title = titleInput?.value || '';
+  const text = textInput?.value || '';
+  if (!title.trim() && !text.trim()) return;
+  try {
+    await VGSync.sendHandout(title, text, {
+      target: document.getElementById('syncHandoutTarget')?.value || 'all',
+    });
+    if (titleInput) titleInput.value = '';
+    if (textInput) textInput.value = '';
+    renderSyncFlow(VGSync.status());
+    toast('Handout sent.', 'success');
+  } catch (err) {
+    toast(`Handout failed: ${err.message}`, 'error');
   }
 }
 
@@ -1894,6 +2070,7 @@ function mountLiveTablePanel() {
   renderSyncLobby(window.VGSync ? VGSync.status().table : null);
   renderSyncChat(window.VGSync ? VGSync.status().messages : []);
   renderSyncCheckpoints(window.VGSync ? VGSync.status().checkpoints : []);
+  renderSyncFlow(window.VGSync ? VGSync.status() : null);
 }
 
 function updateLiveSummary(status = (window.VGSync ? VGSync.status() : null)) {

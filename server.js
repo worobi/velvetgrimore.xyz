@@ -15,6 +15,8 @@ const PRESENCE_ONLINE_MS = 20_000;
 const MAX_MESSAGES = 200;
 const MAX_EVENTS = 500;
 const MAX_CHECKPOINTS = 30;
+const MAX_PROMPTS = 80;
+const MAX_HANDOUTS = 80;
 const LIVE_KEEPALIVE_MS = 15_000;
 const EVENT_TYPES = new Set([
   'table.created',
@@ -25,6 +27,10 @@ const EVENT_TYPES = new Set([
   'checkpoint.created',
   'checkpoint.restored',
   'checkpoint.deleted',
+  'focus.changed',
+  'prompt.sent',
+  'prompt.responded',
+  'handout.sent',
   'dice.roll',
   'scene.change',
   'safety.signal',
@@ -47,6 +53,10 @@ const EVENT_CATEGORIES = {
   'checkpoint.created': 'sync',
   'checkpoint.restored': 'sync',
   'checkpoint.deleted': 'sync',
+  'focus.changed': 'table',
+  'prompt.sent': 'table',
+  'prompt.responded': 'table',
+  'handout.sent': 'table',
   'dice.roll': 'roll',
   'scene.change': 'scene',
   'safety.signal': 'safety',
@@ -139,6 +149,8 @@ function normalizeTable(table) {
   if (!Array.isArray(table.messages)) table.messages = [];
   if (!Array.isArray(table.events)) table.events = [];
   if (!Array.isArray(table.checkpoints)) table.checkpoints = [];
+  if (!Array.isArray(table.prompts)) table.prompts = [];
+  if (!Array.isArray(table.handouts)) table.handouts = [];
   table.createdAt = table.createdAt || now;
   table.updatedAt = table.updatedAt || table.createdAt;
   table.status = table.status || 'lobby';
@@ -147,6 +159,14 @@ function normalizeTable(table) {
   table.msgSeq = Number(table.msgSeq || 0);
   table.evtSeq = Number(table.evtSeq || 0);
   table.checkpointSeq = Number(table.checkpointSeq || 0);
+  table.promptSeq = Number(table.promptSeq || 0);
+  table.handoutSeq = Number(table.handoutSeq || 0);
+  table.flow = table.flow && typeof table.flow === 'object' && !Array.isArray(table.flow) ? table.flow : {};
+  table.flow.focusClientId = String(table.flow.focusClientId || '').slice(0, 80);
+  table.flow.focusName = String(table.flow.focusName || '').slice(0, 80);
+  table.flow.focusNote = String(table.flow.focusNote || '').slice(0, 500);
+  table.flow.updatedAt = table.flow.updatedAt || null;
+  table.flow.updatedBy = table.flow.updatedBy || null;
   Object.keys(table.players).forEach(id => {
     const normalized = cleanPlayer({ id, ...table.players[id] }, table.players[id]?.role || 'protagonist', { touch: false });
     if (normalized) table.players[id] = normalized;
@@ -194,6 +214,34 @@ function normalizeTable(table) {
     createdByName: checkpoint.createdByName || null,
   })).slice(-MAX_CHECKPOINTS);
   table.checkpointSeq = Math.max(table.checkpointSeq, ...table.checkpoints.map(checkpoint => checkpoint.id), 0);
+  table.prompts = table.prompts.map((prompt, index) => ({
+    id: Number(prompt.id || index + 1),
+    target: String(prompt.target || 'all').slice(0, 80) || 'all',
+    targetName: String(prompt.targetName || '').slice(0, 80),
+    question: String(prompt.question || '').slice(0, 1000),
+    kind: String(prompt.kind || 'freeform').slice(0, 40),
+    status: ['open', 'answered', 'closed'].includes(prompt.status) ? prompt.status : 'open',
+    response: String(prompt.response || '').slice(0, 1000),
+    respondedBy: prompt.respondedBy || null,
+    respondedByName: prompt.respondedByName || null,
+    respondedAt: prompt.respondedAt || null,
+    createdAt: prompt.createdAt || now,
+    createdBy: prompt.createdBy || null,
+    createdByName: prompt.createdByName || null,
+  })).filter(prompt => prompt.question.trim()).slice(-MAX_PROMPTS);
+  table.promptSeq = Math.max(table.promptSeq, ...table.prompts.map(prompt => prompt.id), 0);
+  table.handouts = table.handouts.map((handout, index) => ({
+    id: Number(handout.id || index + 1),
+    target: String(handout.target || 'all').slice(0, 80) || 'all',
+    targetName: String(handout.targetName || '').slice(0, 80),
+    title: String(handout.title || `Handout ${index + 1}`).slice(0, 120),
+    text: String(handout.text || '').slice(0, 2000),
+    kind: String(handout.kind || 'note').slice(0, 40),
+    createdAt: handout.createdAt || now,
+    createdBy: handout.createdBy || null,
+    createdByName: handout.createdByName || null,
+  })).filter(handout => handout.title.trim() || handout.text.trim()).slice(-MAX_HANDOUTS);
+  table.handoutSeq = Math.max(table.handoutSeq, ...table.handouts.map(handout => handout.id), 0);
   return table;
 }
 
@@ -385,6 +433,106 @@ function checkpointPayload(table) {
   };
 }
 
+function visibleToPlayer(item, player) {
+  if (!item) return false;
+  if (player?.role === 'warden') return true;
+  return item.target === 'all' || item.target === player?.id;
+}
+
+function tableFlowPayload(table, player = null) {
+  normalizeTable(table);
+  const prompts = table.prompts
+    .filter(prompt => visibleToPlayer(prompt, player))
+    .slice()
+    .reverse();
+  const handouts = table.handouts
+    .filter(handout => visibleToPlayer(handout, player))
+    .slice()
+    .reverse();
+  return {
+    code: table.code,
+    flow: table.flow || {},
+    prompts,
+    handouts,
+    lastPromptId: table.promptSeq || 0,
+    lastHandoutId: table.handoutSeq || 0,
+  };
+}
+
+function targetName(table, target) {
+  if (!target || target === 'all') return 'All players';
+  return table.players?.[target]?.name || 'Selected player';
+}
+
+function addPrompt(table, input = {}, player) {
+  normalizeTable(table);
+  const question = String(input.question || input.text || '').trim().slice(0, 1000);
+  if (!question) return null;
+  const target = String(input.target || 'all').trim().slice(0, 80) || 'all';
+  const now = new Date().toISOString();
+  table.promptSeq = Number(table.promptSeq || 0) + 1;
+  const prompt = {
+    id: table.promptSeq,
+    target,
+    targetName: targetName(table, target),
+    question,
+    kind: String(input.kind || 'freeform').slice(0, 40),
+    status: 'open',
+    response: '',
+    respondedBy: null,
+    respondedByName: null,
+    respondedAt: null,
+    createdAt: now,
+    createdBy: player?.id || null,
+    createdByName: player?.name || null,
+  };
+  table.prompts.push(prompt);
+  table.prompts = table.prompts.slice(-MAX_PROMPTS);
+  table.updatedAt = now;
+  return prompt;
+}
+
+function addHandout(table, input = {}, player) {
+  normalizeTable(table);
+  const title = String(input.title || '').trim().slice(0, 120);
+  const text = String(input.text || input.body || '').trim().slice(0, 2000);
+  if (!title && !text) return null;
+  const target = String(input.target || 'all').trim().slice(0, 80) || 'all';
+  const now = new Date().toISOString();
+  table.handoutSeq = Number(table.handoutSeq || 0) + 1;
+  const handout = {
+    id: table.handoutSeq,
+    target,
+    targetName: targetName(table, target),
+    title: title || 'Table handout',
+    text,
+    kind: String(input.kind || 'note').slice(0, 40),
+    createdAt: now,
+    createdBy: player?.id || null,
+    createdByName: player?.name || null,
+  };
+  table.handouts.push(handout);
+  table.handouts = table.handouts.slice(-MAX_HANDOUTS);
+  table.updatedAt = now;
+  return handout;
+}
+
+function setFocus(table, input = {}, player) {
+  normalizeTable(table);
+  const focusClientId = String(input.focusClientId || input.clientId || '').trim().slice(0, 80);
+  const focusPlayer = focusClientId ? table.players?.[focusClientId] : null;
+  const now = new Date().toISOString();
+  table.flow = {
+    focusClientId,
+    focusName: String(input.focusName || focusPlayer?.name || '').slice(0, 80),
+    focusNote: String(input.focusNote || input.note || '').slice(0, 500),
+    updatedAt: now,
+    updatedBy: player?.id || null,
+  };
+  table.updatedAt = now;
+  return table.flow;
+}
+
 function addCheckpoint(table, input = {}, player = null, reason = 'manual') {
   normalizeTable(table);
   const cleaned = cleanCheckpointInput(input);
@@ -436,6 +584,10 @@ function activityText(type, player, detail = {}) {
   if (type === 'checkpoint.created') return `${name} saved a session checkpoint.`;
   if (type === 'checkpoint.restored') return `${name} restored a session checkpoint.`;
   if (type === 'checkpoint.deleted') return `${name} deleted a session checkpoint.`;
+  if (type === 'focus.changed') return `${name} changed the table spotlight.`;
+  if (type === 'prompt.sent') return `${name} sent a table prompt.`;
+  if (type === 'prompt.responded') return `${name} answered a table prompt.`;
+  if (type === 'handout.sent') return `${name} sent a table handout.`;
   if (type === 'dice.roll') return `${name} rolled d${detail.sides || '?'}${detail.result ? `: ${detail.result}` : ''}.`;
   if (type === 'scene.change') return `${name} changed scene${detail.sceneTitle ? ` to ${detail.sceneTitle}` : ''}.`;
   if (type === 'safety.signal') return `${name} raised ${detail.tier || 'a safety signal'}.`;
@@ -677,6 +829,7 @@ function tablePayload(table) {
       snapshotWriterId: writer?.id || null,
       snapshotWriterName: writer?.name || null,
     },
+    flow: table.flow || {},
     updatedAt: table.updatedAt,
     updatedBy: table.updatedBy || null,
   };
@@ -697,6 +850,7 @@ function liveClientPayload(table, client, reason = 'sync') {
     table: tablePayload(table),
     messages,
     events,
+    flow: tableFlowPayload(table, client.player || null),
     sentAt: new Date().toISOString(),
   };
 }
@@ -726,6 +880,7 @@ function openLiveStream(req, res, tableCode) {
   const client = {
     res,
     includePending,
+    player: table.players?.[url.searchParams.get('clientId')] || null,
     lastMessageId: Number(url.searchParams.get('lastMessageId') || 0),
     lastEventId: Number(url.searchParams.get('lastEventId') || 0),
     keepalive: null,
@@ -792,6 +947,11 @@ async function handleApi(req, res, pathname) {
       evtSeq: 0,
       checkpoints: [],
       checkpointSeq: 0,
+      prompts: [],
+      promptSeq: 0,
+      handouts: [],
+      handoutSeq: 0,
+      flow: {},
     };
     const player = upsertPlayer(table, {
       clientId: body.clientId,
@@ -895,6 +1055,129 @@ async function handleApi(req, res, pathname) {
       writeTables(data);
       broadcastTable(tableCode, 'message.created', table);
       return send(res, 201, { ...messagesPayload(table), message });
+    }
+  }
+
+  const flowMatch = pathname.match(/^\/api\/tables\/([A-Z0-9]{4,10})\/flow$/i);
+  if (flowMatch) {
+    const tableCode = flowMatch[1].toUpperCase();
+    const data = readTables();
+    const table = data.tables[tableCode] && normalizeTable(data.tables[tableCode]);
+    if (!table) return send(res, 404, { error: 'Table not found' });
+    const url = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
+    const clientId = String(url.searchParams.get('clientId') || '').trim().slice(0, 80);
+    const viewer = table.players?.[clientId] || null;
+
+    if (req.method === 'GET') return send(res, 200, tableFlowPayload(table, viewer));
+
+    if (req.method === 'PATCH') {
+      const body = await readBody(req);
+      const input = body.player || body;
+      const id = String(input.clientId || input.id || body.clientId || '').trim().slice(0, 80);
+      if (!id) return send(res, 400, { error: 'Player clientId is required' });
+      const fallbackRole = table.players[id]?.role || input.role || body.role || 'protagonist';
+      const player = upsertPlayer(table, { ...input, clientId: id }, fallbackRole);
+      if (!player || player.role !== 'warden') return send(res, 403, { error: 'Only the Warden can change table focus.' });
+      const flow = setFocus(table, body, player);
+      addEvent(table, {
+        type: 'focus.changed',
+        text: flow.focusClientId ? `${player.name || 'Warden'} spotlighted ${flow.focusName || 'a player'}.` : `${player.name || 'Warden'} cleared the table spotlight.`,
+        detail: flow,
+      }, player);
+      data.tables[tableCode] = table;
+      writeTables(data);
+      broadcastTable(tableCode, 'flow.updated', table);
+      return send(res, 200, tableFlowPayload(table, player));
+    }
+  }
+
+  const promptMatch = pathname.match(/^\/api\/tables\/([A-Z0-9]{4,10})\/prompts(?:\/([0-9]+))?$/i);
+  if (promptMatch) {
+    const tableCode = promptMatch[1].toUpperCase();
+    const promptId = promptMatch[2] ? Number(promptMatch[2]) : null;
+    const data = readTables();
+    const table = data.tables[tableCode] && normalizeTable(data.tables[tableCode]);
+    if (!table) return send(res, 404, { error: 'Table not found' });
+    const body = req.method === 'GET' ? {} : await readBody(req);
+    const input = body.player || body;
+    const id = String(input.clientId || input.id || body.clientId || '').trim().slice(0, 80);
+    const player = id ? upsertPlayer(table, { ...input, clientId: id }, table.players[id]?.role || input.role || body.role || 'protagonist') : null;
+
+    if (!promptId && req.method === 'GET') return send(res, 200, tableFlowPayload(table, player));
+
+    if (!promptId && req.method === 'POST') {
+      if (!player || player.role !== 'warden') return send(res, 403, { error: 'Only the Warden can send table prompts.' });
+      const prompt = addPrompt(table, body, player);
+      if (!prompt) return send(res, 400, { error: 'Prompt text is required' });
+      addEvent(table, {
+        type: 'prompt.sent',
+        text: `${player.name || 'Warden'} prompted ${prompt.targetName || 'the table'}: ${prompt.question}`,
+        detail: { promptId: prompt.id, target: prompt.target, targetName: prompt.targetName, kind: prompt.kind },
+      }, player);
+      data.tables[tableCode] = table;
+      writeTables(data);
+      broadcastTable(tableCode, 'prompt.sent', table);
+      return send(res, 201, { ...tableFlowPayload(table, player), prompt });
+    }
+
+    const prompt = table.prompts.find(item => item.id === promptId);
+    if (!prompt) return send(res, 404, { error: 'Prompt not found' });
+
+    if (promptId && req.method === 'PATCH') {
+      if (!player) return send(res, 400, { error: 'Player clientId is required' });
+      const action = String(body.action || 'respond').toLowerCase();
+      if (action === 'close') {
+        if (player.role !== 'warden') return send(res, 403, { error: 'Only the Warden can close prompts.' });
+        prompt.status = 'closed';
+      } else {
+        if (!visibleToPlayer(prompt, player)) return send(res, 403, { error: 'This prompt is not assigned to this player.' });
+        const response = String(body.response || body.text || '').trim().slice(0, 1000);
+        if (!response) return send(res, 400, { error: 'Response text is required' });
+        prompt.status = 'answered';
+        prompt.response = response;
+        prompt.respondedBy = player.id;
+        prompt.respondedByName = player.name;
+        prompt.respondedAt = new Date().toISOString();
+        addEvent(table, {
+          type: 'prompt.responded',
+          text: `${player.name || 'A player'} answered: ${response}`,
+          detail: { promptId: prompt.id, target: prompt.target },
+        }, player);
+      }
+      table.updatedAt = new Date().toISOString();
+      data.tables[tableCode] = table;
+      writeTables(data);
+      broadcastTable(tableCode, 'prompt.updated', table);
+      return send(res, 200, { ...tableFlowPayload(table, player), prompt });
+    }
+  }
+
+  const handoutMatch = pathname.match(/^\/api\/tables\/([A-Z0-9]{4,10})\/handouts$/i);
+  if (handoutMatch) {
+    const tableCode = handoutMatch[1].toUpperCase();
+    const data = readTables();
+    const table = data.tables[tableCode] && normalizeTable(data.tables[tableCode]);
+    if (!table) return send(res, 404, { error: 'Table not found' });
+    const body = req.method === 'GET' ? {} : await readBody(req);
+    const input = body.player || body;
+    const id = String(input.clientId || input.id || body.clientId || '').trim().slice(0, 80);
+    const player = id ? upsertPlayer(table, { ...input, clientId: id }, table.players[id]?.role || input.role || body.role || 'protagonist') : null;
+
+    if (req.method === 'GET') return send(res, 200, tableFlowPayload(table, player));
+
+    if (req.method === 'POST') {
+      if (!player || player.role !== 'warden') return send(res, 403, { error: 'Only the Warden can send handouts.' });
+      const handout = addHandout(table, body, player);
+      if (!handout) return send(res, 400, { error: 'Handout title or text is required' });
+      addEvent(table, {
+        type: 'handout.sent',
+        text: `${player.name || 'Warden'} sent ${handout.targetName || 'the table'} a handout: ${handout.title}.`,
+        detail: { handoutId: handout.id, target: handout.target, targetName: handout.targetName, kind: handout.kind },
+      }, player);
+      data.tables[tableCode] = table;
+      writeTables(data);
+      broadcastTable(tableCode, 'handout.sent', table);
+      return send(res, 201, { ...tableFlowPayload(table, player), handout });
     }
   }
 

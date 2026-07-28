@@ -31,6 +31,7 @@ const VGSync = (() => {
   let lastEventId = 0;
   let events = [];
   let checkpoints = [];
+  let flowState = { flow: {}, prompts: [], handouts: [] };
   let liveStream = null;
   let liveState = 'off';
 
@@ -183,6 +184,16 @@ const VGSync = (() => {
       checkpoints = payload.checkpoints.checkpoints || payload.checkpoints || [];
       callbacks.onCheckpoints?.(checkpoints);
     }
+    if (payload.flow) {
+      flowState = {
+        flow: payload.flow.flow || {},
+        prompts: payload.flow.prompts || [],
+        handouts: payload.flow.handouts || [],
+        lastPromptId: payload.flow.lastPromptId || 0,
+        lastHandoutId: payload.flow.lastHandoutId || 0,
+      };
+      callbacks.onFlow?.(flowState);
+    }
     callbacks.onLive?.({ state: liveState, reason: payload.reason || 'sync', sentAt: payload.sentAt || null });
     callbacks.onStatus?.(status());
   }
@@ -253,6 +264,7 @@ const VGSync = (() => {
     events = [];
     lastEventId = 0;
     checkpoints = [];
+    flowState = { flow: {}, prompts: [], handouts: [] };
     const next = saveConfig({ ...config, enabled: true, code: table.code, lastRev: table.rev, role: 'warden', ready: true });
     lastFingerprint = fingerprint(local);
     start(callbacks);
@@ -278,6 +290,7 @@ const VGSync = (() => {
     events = [];
     lastEventId = 0;
     checkpoints = [];
+    flowState = { flow: {}, prompts: [], handouts: [] };
     const next = saveConfig({
       ...config,
       enabled: true,
@@ -493,6 +506,102 @@ const VGSync = (() => {
     return checkpoints;
   }
 
+  function applyFlowPayload(payload = {}) {
+    flowState = {
+      flow: payload.flow || {},
+      prompts: payload.prompts || [],
+      handouts: payload.handouts || [],
+      lastPromptId: payload.lastPromptId || 0,
+      lastHandoutId: payload.lastHandoutId || 0,
+    };
+    callbacks.onFlow?.(flowState);
+    callbacks.onStatus?.(status());
+    return flowState;
+  }
+
+  async function fetchFlow() {
+    const config = getConfig();
+    if (!config.enabled || !config.code) return flowState;
+    const payload = await request(`/api/tables/${config.code}/flow?clientId=${encodeURIComponent(config.clientId)}`);
+    return applyFlowPayload(payload);
+  }
+
+  async function setFocus(focusClientId = '', focusNote = '') {
+    const config = getConfig();
+    if (!config.enabled || !config.code) throw new Error('Join or create a table first.');
+    if (!canWriteSharedState()) throw new Error('Only the Warden can change spotlight.');
+    const payload = await request(`/api/tables/${config.code}/flow`, {
+      method: 'PATCH',
+      body: JSON.stringify({
+        focusClientId,
+        focusNote,
+        player: playerPayload(),
+      }),
+    });
+    return applyFlowPayload(payload);
+  }
+
+  async function sendPrompt(question, options = {}) {
+    const config = getConfig();
+    if (!config.enabled || !config.code) throw new Error('Join or create a table first.');
+    if (!canWriteSharedState()) throw new Error('Only the Warden can send prompts.');
+    const payload = await request(`/api/tables/${config.code}/prompts`, {
+      method: 'POST',
+      body: JSON.stringify({
+        question,
+        target: options.target || 'all',
+        kind: options.kind || 'freeform',
+        player: playerPayload(),
+      }),
+    });
+    return applyFlowPayload(payload);
+  }
+
+  async function respondPrompt(promptId, response) {
+    const config = getConfig();
+    if (!config.enabled || !config.code) throw new Error('Join or create a table first.');
+    const payload = await request(`/api/tables/${config.code}/prompts/${encodeURIComponent(promptId)}`, {
+      method: 'PATCH',
+      body: JSON.stringify({
+        action: 'respond',
+        response,
+        player: playerPayload(),
+      }),
+    });
+    return applyFlowPayload(payload);
+  }
+
+  async function closePrompt(promptId) {
+    const config = getConfig();
+    if (!config.enabled || !config.code) throw new Error('Join or create a table first.');
+    if (!canWriteSharedState()) throw new Error('Only the Warden can close prompts.');
+    const payload = await request(`/api/tables/${config.code}/prompts/${encodeURIComponent(promptId)}`, {
+      method: 'PATCH',
+      body: JSON.stringify({
+        action: 'close',
+        player: playerPayload(),
+      }),
+    });
+    return applyFlowPayload(payload);
+  }
+
+  async function sendHandout(title, text, options = {}) {
+    const config = getConfig();
+    if (!config.enabled || !config.code) throw new Error('Join or create a table first.');
+    if (!canWriteSharedState()) throw new Error('Only the Warden can send handouts.');
+    const payload = await request(`/api/tables/${config.code}/handouts`, {
+      method: 'POST',
+      body: JSON.stringify({
+        title,
+        text,
+        target: options.target || 'all',
+        kind: options.kind || 'note',
+        player: playerPayload(),
+      }),
+    });
+    return applyFlowPayload(payload);
+  }
+
   async function updatePlayer(updates = {}) {
     const config = getConfig();
     if (!config.code) throw new Error('Join or create a table first.');
@@ -573,6 +682,7 @@ const VGSync = (() => {
         await fetchMessages();
         await fetchEvents();
         if (!checkpoints.length && canWriteSharedState()) await fetchCheckpoints();
+        await fetchFlow();
       }
       await push();
     } catch (err) {
@@ -625,6 +735,9 @@ const VGSync = (() => {
       events,
       lastEventId,
       checkpoints,
+      flow: flowState.flow || {},
+      prompts: flowState.prompts || [],
+      handouts: flowState.handouts || [],
       table: lastTable,
       players: lastTable?.players || [],
     };
@@ -654,6 +767,12 @@ const VGSync = (() => {
     createCheckpoint,
     restoreCheckpoint,
     deleteCheckpoint,
+    fetchFlow,
+    setFocus,
+    sendPrompt,
+    respondPrompt,
+    closePrompt,
+    sendHandout,
     updatePlayer,
     setReady,
     pull,
