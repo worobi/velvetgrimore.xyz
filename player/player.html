@@ -358,6 +358,20 @@ textarea.npc-response:focus { border-color: var(--border-hot); }
   <div class="remote-join" id="playerRemoteChatDock" style="margin-top:22px;">
     <div style="font-family:'Cinzel',serif;color:var(--gold);font-size:14px;letter-spacing:1px;margin-bottom:6px;">Table Chat</div>
     <div id="playerSyncStatus" style="font-size:13px;color:var(--text-muted);margin-bottom:10px;"></div>
+    <div class="summary-grid" style="margin-bottom:12px;">
+      <div class="summary-card">
+        <div class="summary-label">Connection</div>
+        <div class="summary-value" id="playerLiveConnection">Offline</div>
+      </div>
+      <div class="summary-card">
+        <div class="summary-label">Table</div>
+        <div class="summary-value" id="playerLiveTable">No table</div>
+      </div>
+      <div class="summary-card">
+        <div class="summary-label">My Requests</div>
+        <div class="summary-value" id="playerLiveRequests">None</div>
+      </div>
+    </div>
     <div id="playerSyncLobby" style="display:grid;gap:8px;margin-bottom:12px;"></div>
     <div style="font-family:'Cinzel',serif;color:var(--gold);font-size:12px;letter-spacing:1px;text-transform:uppercase;margin-bottom:8px;">Table Requests</div>
     <div style="display:grid;gap:8px;margin-bottom:12px;background:rgba(0,0,0,0.18);border:1px solid var(--border);border-radius:6px;padding:10px;">
@@ -371,6 +385,8 @@ textarea.npc-response:focus { border-color: var(--border-hot); }
       </div>
       <input type="text" id="playerRequestNote" placeholder="Optional request note..." style="width:100%;">
     </div>
+    <div style="font-family:'Cinzel',serif;color:var(--gold);font-size:12px;letter-spacing:1px;text-transform:uppercase;margin-bottom:8px;">My Request Tracker</div>
+    <div id="playerRequestTracker" style="display:grid;gap:8px;max-height:180px;overflow:auto;background:rgba(0,0,0,0.18);border:1px solid var(--border);border-radius:6px;padding:10px;margin-bottom:12px;"></div>
     <div style="font-family:'Cinzel',serif;color:var(--gold);font-size:12px;letter-spacing:1px;text-transform:uppercase;margin-bottom:8px;">Activity Feed</div>
     <div id="playerEventRail" style="display:grid;gap:8px;max-height:220px;overflow:auto;background:rgba(0,0,0,0.18);border:1px solid var(--border);border-radius:6px;padding:10px;margin-bottom:12px;"></div>
     <div id="playerChatLog" style="display:grid;gap:8px;max-height:220px;overflow:auto;background:rgba(0,0,0,0.18);border:1px solid var(--border);border-radius:6px;padding:10px;"></div>
@@ -643,6 +659,51 @@ function updatePlayerSyncStatus(status = (window.VGSync ? VGSync.status() : null
     ? `Connected to table ${status.code} · ${liveText} · ${status.role || 'protagonist'} · ${status.ready ? 'ready' : 'not ready'} · ${status.canWriteSharedState ? 'state control on' : 'view only'} · revision ${status.lastRev || 0}${status.error ? ` · ${status.error}` : ''}`
     : (status.error ? `Sync error: ${status.error}` : '');
   renderPlayerLobby(status.table);
+  renderPlayerLiveSummary(status);
+}
+
+function playerOwnedRequestEvents(events = (window.VGSync ? VGSync.status().events : [])) {
+  if (!window.VGSync) return [];
+  const clientId = VGSync.status().clientId;
+  const mine = (events || []).filter(event => event.clientId === clientId);
+  const requestIds = new Set(mine.map(event => event.id));
+  const receipts = (events || []).filter(event => requestIds.has(event.detail?.sourceEventId));
+  return [...mine, ...receipts].sort((a, b) => (a.id || 0) - (b.id || 0));
+}
+
+function latestRequestStatus(events = (window.VGSync ? VGSync.status().events : [])) {
+  const mine = playerOwnedRequestEvents(events);
+  const requests = mine.filter(isPlayerRequestEvent);
+  const pending = requests.filter(event => event.status === 'pending').length;
+  const approved = requests.filter(event => event.status === 'approved').length;
+  const rejected = requests.filter(event => event.status === 'rejected').length + mine.filter(event => event.type === 'action.rejected').length;
+  const applied = mine.filter(event => event.type === 'action.applied').length;
+  if (!requests.length) return 'None';
+  return `${pending} pending · ${approved} approved · ${applied} applied · ${rejected} rejected`;
+}
+
+function isPlayerRequestEvent(event) {
+  if (['movement.request', 'map.reveal', 'scene.change'].includes(event.type)) return true;
+  return event.type === 'note.added' && event.detail?.action === 'player-interaction-request';
+}
+
+function renderPlayerLiveSummary(status = (window.VGSync ? VGSync.status() : null)) {
+  const connection = document.getElementById('playerLiveConnection');
+  const table = document.getElementById('playerLiveTable');
+  const requests = document.getElementById('playerLiveRequests');
+  if (!connection || !table || !requests) return;
+  if (!status || !status.enabled || !status.code) {
+    connection.textContent = 'Offline';
+    table.textContent = 'No table';
+    requests.textContent = 'None';
+    return;
+  }
+  const players = status.players || status.table?.players || [];
+  const online = players.filter(player => player.online).length;
+  const ready = players.filter(player => player.ready).length;
+  connection.textContent = status.liveConnected ? 'Live' : (status.liveState === 'reconnecting' ? 'Reconnecting' : 'Polling');
+  table.textContent = `${status.code} · ${online}/${players.length || 0} online · ${ready} ready`;
+  requests.textContent = latestRequestStatus(status.events || []);
 }
 
 function renderPlayerLobby(table = (window.VGSync ? VGSync.status().table : null)) {
@@ -707,6 +768,8 @@ function playerEventLabel(event) {
 function renderPlayerEvents(events = (window.VGSync ? VGSync.status().events : [])) {
   const el = document.getElementById('playerEventRail');
   if (!el) return;
+  renderPlayerRequestTracker(events);
+  renderPlayerLiveSummary(window.VGSync ? VGSync.status() : null);
   if (!events?.length) {
     el.innerHTML = `<div style="font-size:12px;color:var(--text-muted);font-style:italic;">Join a remote table to see activity.</div>`;
     return;
@@ -720,6 +783,43 @@ function renderPlayerEvents(events = (window.VGSync ? VGSync.status().events : [
           <span>${escapeHtml(time)}</span>
         </div>
         <div style="font-size:14px;line-height:1.5;color:var(--text-dim);margin-top:3px;">${escapeHtml(event.text || '')}</div>
+      </div>
+    `;
+  }).join('');
+}
+
+function requestTrackerLabel(event) {
+  const d = event.detail || {};
+  if (event.type === 'movement.request') return d.direction ? `Move ${d.direction}` : 'Movement request';
+  if (event.type === 'map.reveal') return d.action ? `Map ${d.action}` : 'Map reveal request';
+  if (event.type === 'scene.change') return d.branch ? `Scene branch: ${d.branch}` : 'Scene request';
+  if (event.type === 'action.applied') return 'Applied by Warden';
+  if (event.type === 'action.rejected') return 'Rejected by Warden';
+  if (event.type === 'note.added') return d.action === 'player-interaction-request' ? 'Scene attention request' : 'Note';
+  return playerEventLabel(event);
+}
+
+function renderPlayerRequestTracker(events = (window.VGSync ? VGSync.status().events : [])) {
+  const el = document.getElementById('playerRequestTracker');
+  if (!el) return;
+  const mine = playerOwnedRequestEvents(events).filter(event => (
+    isPlayerRequestEvent(event) || ['action.applied', 'action.rejected'].includes(event.type)
+  )).slice(-20).reverse();
+  if (!mine.length) {
+    el.innerHTML = `<div style="font-size:12px;color:var(--text-muted);font-style:italic;">No requests sent yet.</div>`;
+    return;
+  }
+  el.innerHTML = mine.map(event => {
+    const time = event.createdAt ? new Date(event.createdAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }) : '';
+    const status = event.type === 'action.applied' ? 'applied' : (event.type === 'action.rejected' ? 'rejected' : (event.status || 'posted'));
+    const color = status === 'pending' ? 'var(--gold)' : (status === 'rejected' ? '#ff8888' : (status === 'approved' || status === 'applied' ? '#9edc9e' : 'var(--text)'));
+    return `
+      <div style="border-bottom:1px solid rgba(255,255,255,0.04);padding-bottom:7px;">
+        <div style="display:flex;justify-content:space-between;gap:10px;font-size:12px;color:var(--text-muted);">
+          <span><strong style="color:${color};">${escapeHtml(requestTrackerLabel(event))}</strong> · ${escapeHtml(status)}</span>
+          <span>${escapeHtml(time)}</span>
+        </div>
+        <div style="font-size:13px;line-height:1.5;color:var(--text-dim);margin-top:3px;">${escapeHtml(event.text || '')}</div>
       </div>
     `;
   }).join('');
@@ -809,6 +909,11 @@ function playerRequestNote() {
   return document.getElementById('playerRequestNote')?.value?.trim() || '';
 }
 
+function clearPlayerRequestNote() {
+  const input = document.getElementById('playerRequestNote');
+  if (input) input.value = '';
+}
+
 function requestMove(direction) {
   const map = activePlayerMap();
   const note = playerRequestNote();
@@ -821,6 +926,7 @@ function requestMove(direction) {
     approvalRequired: true,
     text: `Requested movement ${direction}${map?.name ? ` on ${map.name}` : ''}${note ? `: ${note}` : '.'}`,
   });
+  clearPlayerRequestNote();
   showToast('Movement request sent to the Warden.');
 }
 
@@ -836,6 +942,7 @@ function requestMapReveal() {
     approvalRequired: true,
     text: `Requested a map reveal${map?.name ? ` on ${map.name}` : ''}${note ? `: ${note}` : '.'}`,
   });
+  clearPlayerRequestNote();
   showToast('Map reveal request sent to the Warden.');
 }
 
@@ -851,6 +958,7 @@ function requestSceneInteraction() {
     approvalRequired: true,
     text: `Requested scene attention${scene?.title ? ` for ${scene.title}` : ''}${note ? `: ${note}` : '.'}`,
   });
+  clearPlayerRequestNote();
   showToast('Scene request sent to the Warden.');
 }
 
@@ -875,6 +983,7 @@ function requestSceneBranch(branch) {
     approvalRequired: true,
     text: `Requested ${branch} branch${target?.title ? ` to ${target.title}` : ''}${note ? `: ${note}` : '.'}`,
   });
+  clearPlayerRequestNote();
   showToast('Scene branch request sent to the Warden.');
 }
 

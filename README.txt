@@ -53,6 +53,7 @@ KNOWN LIMITATIONS
 - V6 applies approved movement, map reveal, and scene branch requests to the shared table state and records applied/rejected receipts.
 - V7 adds an Admin session timeline with category/player/bookmark filters, recap exports, private-safe modes, bookmarks, and next-session notes.
 - V8 adds a dedicated Warden Live Table command center for roster, readiness, approvals, chat, activity, timeline, and exports.
+- V9 adds a Player Live Table dashboard with connection/table summaries and a personal request tracker.
 - Clients use live server-push updates for table, chat, and activity changes, with event-ID polling kept as a fallback.
 - In Docker/Coolify, mount persistent storage at `/data` so table-code state survives rebuilds.
 - Discord webhooks send selected events to Discord only if you configure one.
