@@ -47,7 +47,7 @@ KNOWN LIMITATIONS
 - State is stored in the browser. Clearing browser data clears campaigns unless you export a backup first.
 - Remote play requires the included VPS backend (`node server.js`) or an equivalent hosted `/api/` service.
 - Table-code sync uses whole snapshots controlled by the Warden seat.
-- Multiplayer V2 includes table codes, player names, roles, ready state, online/idle presence, and Warden-only shared-state writes.
+- Multiplayer V3 includes table codes, player names, roles, ready state, online/idle presence, Warden-only shared-state writes, and table chat.
 - In Docker/Coolify, mount persistent storage at `/data` so table-code state survives rebuilds.
 - Discord webhooks send selected events to Discord only if you configure one.
 - Before private play, replace demo characters, safety answers, and ward decisions with your real table's choices.

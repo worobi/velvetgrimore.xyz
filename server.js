@@ -12,6 +12,7 @@ const TABLES_FILE = path.join(DATA_DIR, 'tables.json');
 const PORT = Number(process.env.PORT || 8765);
 const PLAYER_ROLES = new Set(['warden', 'protagonist', 'boss', 'spectator']);
 const PRESENCE_ONLINE_MS = 20_000;
+const MAX_MESSAGES = 200;
 
 const MIME = {
   '.html': 'text/html; charset=utf-8',
@@ -78,16 +79,27 @@ function cleanPlayer(input = {}, fallbackRole = 'protagonist', options = {}) {
 function normalizeTable(table) {
   const now = new Date().toISOString();
   if (!table.players || typeof table.players !== 'object' || Array.isArray(table.players)) table.players = {};
+  if (!Array.isArray(table.messages)) table.messages = [];
   table.createdAt = table.createdAt || now;
   table.updatedAt = table.updatedAt || table.createdAt;
   table.status = table.status || 'lobby';
   table.snapshot = table.snapshot || {};
   table.rev = Number(table.rev || 1);
+  table.msgSeq = Number(table.msgSeq || 0);
   Object.keys(table.players).forEach(id => {
     const normalized = cleanPlayer({ id, ...table.players[id] }, table.players[id]?.role || 'protagonist', { touch: false });
     if (normalized) table.players[id] = normalized;
     else delete table.players[id];
   });
+  table.messages = table.messages.map((message, index) => ({
+    id: Number(message.id || index + 1),
+    clientId: String(message.clientId || '').slice(0, 80),
+    name: String(message.name || 'Seated Player').slice(0, 80),
+    role: cleanRole(message.role, 'protagonist'),
+    text: String(message.text || '').slice(0, 1000),
+    createdAt: message.createdAt || now,
+  })).filter(message => message.text.trim()).slice(-MAX_MESSAGES);
+  table.msgSeq = Math.max(table.msgSeq, ...table.messages.map(message => message.id), 0);
   return table;
 }
 
@@ -131,6 +143,45 @@ function canUseRole(table, clientId, role) {
   if (nextRole !== 'warden') return true;
   const warden = currentWarden(table);
   return !warden || warden.id === clientId;
+}
+
+function cleanMessage(input = {}, player = null) {
+  const text = String(input.text || input.message || '').trim().slice(0, 1000);
+  if (!text) return null;
+  return {
+    clientId: String(input.clientId || player?.id || '').trim().slice(0, 80),
+    name: String(input.name || player?.name || 'Seated Player').trim().slice(0, 80) || 'Seated Player',
+    role: cleanRole(input.role || player?.role, player?.role || 'protagonist'),
+    text,
+  };
+}
+
+function addMessage(table, input, player) {
+  normalizeTable(table);
+  const cleaned = cleanMessage(input, player);
+  if (!cleaned || !cleaned.clientId) return null;
+  const now = new Date().toISOString();
+  table.msgSeq = Number(table.msgSeq || 0) + 1;
+  const message = {
+    id: table.msgSeq,
+    ...cleaned,
+    createdAt: now,
+  };
+  table.messages.push(message);
+  table.messages = table.messages.slice(-MAX_MESSAGES);
+  table.updatedAt = now;
+  return message;
+}
+
+function messagesPayload(table, since = 0) {
+  normalizeTable(table);
+  const after = Number(since || 0);
+  const messages = table.messages.filter(message => message.id > after);
+  return {
+    code: table.code,
+    lastMessageId: table.msgSeq || 0,
+    messages,
+  };
 }
 
 function send(res, status, body, headers = {}) {
@@ -205,6 +256,8 @@ async function handleApi(req, res, pathname) {
       createdAt: now,
       updatedAt: now,
       updatedBy: body.clientId || null,
+      messages: [],
+      msgSeq: 0,
     };
     upsertPlayer(table, {
       clientId: body.clientId,
@@ -264,6 +317,35 @@ async function handleApi(req, res, pathname) {
     data.tables[tableCode] = table;
     writeTables(data);
     return send(res, 200, tablePayload(table));
+  }
+
+  const messagesMatch = pathname.match(/^\/api\/tables\/([A-Z0-9]{4,10})\/messages$/i);
+  if (messagesMatch) {
+    const tableCode = messagesMatch[1].toUpperCase();
+    const data = readTables();
+    const table = data.tables[tableCode] && normalizeTable(data.tables[tableCode]);
+    if (!table) return send(res, 404, { error: 'Table not found' });
+
+    if (req.method === 'GET') {
+      const url = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
+      return send(res, 200, messagesPayload(table, url.searchParams.get('since')));
+    }
+
+    if (req.method === 'POST') {
+      const body = await readBody(req);
+      const input = body.player || body;
+      const id = String(input.clientId || input.id || body.clientId || '').trim().slice(0, 80);
+      if (!id) return send(res, 400, { error: 'Player clientId is required' });
+      const fallbackRole = table.players[id]?.role || input.role || body.role || 'protagonist';
+      const player = upsertPlayer(table, { ...input, clientId: id }, fallbackRole);
+      if (!player) return send(res, 400, { error: 'Player clientId is required' });
+      const messageInput = body.message && typeof body.message === 'object' ? body.message : body;
+      const message = addMessage(table, { ...messageInput, clientId: id }, player);
+      if (!message) return send(res, 400, { error: 'Message text is required' });
+      data.tables[tableCode] = table;
+      writeTables(data);
+      return send(res, 201, { ...messagesPayload(table), message });
+    }
   }
 
   const match = pathname.match(/^\/api\/tables\/([A-Z0-9]{4,10})$/i);

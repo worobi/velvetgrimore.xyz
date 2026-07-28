@@ -108,12 +108,13 @@ In the app:
 5. Player opens /player/player.html, enters their table name and role, then joins.
 6. Use the lobby roster to confirm each seated player is online and ready.
 7. The Warden seat controls shared table state; player and spectator seats receive updates but cannot overwrite the shared snapshot.
+8. Use Table Chat for table-scoped messages between connected users.
 
 DATA MODEL
 All app data is browser-local unless a Discord webhook is configured.
 The Intimate Table layer stores scene chat, consent ceiling, heat, and want/boundary cards in browser storage.
 In VPS backend mode, synced table snapshots and lobby player records are also stored on the VPS in DATA_DIR/tables.json.
-Multiplayer V2 adds online/idle presence and Warden-only shared-state writes to prevent player screens from overwriting the table snapshot.
+Multiplayer V3 adds online/idle presence, Warden-only shared-state writes, and table chat messages between connected users.
 
 Before real play:
 1. Open Admin -> Settings -> Backup Everything.

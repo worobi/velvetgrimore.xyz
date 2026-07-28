@@ -355,6 +355,16 @@ textarea.npc-response:focus { border-color: var(--border-hot); }
   </div>
 
   <div id="mainContent"></div>
+  <div class="remote-join" id="playerRemoteChatDock" style="margin-top:22px;">
+    <div style="font-family:'Cinzel',serif;color:var(--gold);font-size:14px;letter-spacing:1px;margin-bottom:6px;">Table Chat</div>
+    <div id="playerSyncStatus" style="font-size:13px;color:var(--text-muted);margin-bottom:10px;"></div>
+    <div id="playerSyncLobby" style="display:grid;gap:8px;margin-bottom:12px;"></div>
+    <div id="playerChatLog" style="display:grid;gap:8px;max-height:220px;overflow:auto;background:rgba(0,0,0,0.18);border:1px solid var(--border);border-radius:6px;padding:10px;"></div>
+    <div class="remote-join-row" style="margin-top:10px;">
+      <input type="text" id="playerChatInput" placeholder="Message the table..." onkeydown="if(event.key==='Enter') playerSendChat()">
+      <button class="btn btn-purple" onclick="playerSendChat()">Send</button>
+    </div>
+  </div>
 </div>
 
 <div class="status-bar">
@@ -427,8 +437,6 @@ function render(session) {
             <button class="btn btn-ghost" onclick="playerRefreshLobby()">Refresh Lobby</button>
             <button class="btn btn-ghost" onclick="playerToggleReady()">Toggle Ready</button>
           </div>
-          <div id="playerSyncStatus" style="font-size:13px;color:var(--text-muted);margin-top:10px;"></div>
-          <div id="playerSyncLobby" style="display:grid;gap:8px;margin-top:12px;"></div>
         </div>
       </div>`;
     return;
@@ -593,8 +601,11 @@ function initRemoteSync() {
     },
     onStatus: updatePlayerSyncStatus,
     onLobby: renderPlayerLobby,
+    onChat: renderPlayerChat,
     onError: err => updatePlayerSyncStatus({ ...VGSync.status(), error: err.message }),
   });
+  updatePlayerSyncStatus(VGSync.status());
+  renderPlayerChat(VGSync.status().messages || []);
 }
 
 function updatePlayerSyncStatus(status = (window.VGSync ? VGSync.status() : null)) {
@@ -622,6 +633,28 @@ function renderPlayerLobby(table = (window.VGSync ? VGSync.status().table : null
   `).join('');
 }
 
+function renderPlayerChat(messages = (window.VGSync ? VGSync.status().messages : [])) {
+  const el = document.getElementById('playerChatLog');
+  if (!el) return;
+  if (!messages?.length) {
+    el.innerHTML = `<div style="font-size:12px;color:var(--text-muted);font-style:italic;">Join a remote table to chat.</div>`;
+    return;
+  }
+  el.innerHTML = messages.slice(-50).map(message => {
+    const time = message.createdAt ? new Date(message.createdAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }) : '';
+    return `
+      <div style="border-bottom:1px solid rgba(255,255,255,0.04);padding-bottom:7px;">
+        <div style="display:flex;justify-content:space-between;gap:10px;font-size:12px;color:var(--text-muted);">
+          <span><strong style="color:var(--text);">${escapeHtml(message.name || 'Seated Player')}</strong> · ${escapeHtml(message.role || 'protagonist')}</span>
+          <span>${escapeHtml(time)}</span>
+        </div>
+        <div style="font-size:14px;line-height:1.5;color:var(--text-dim);margin-top:3px;">${escapeHtml(message.text || '')}</div>
+      </div>
+    `;
+  }).join('');
+  el.scrollTop = el.scrollHeight;
+}
+
 async function joinRemoteTableFromPlayer() {
   if (!window.VGSync) return;
   const code = document.getElementById('playerSyncCode')?.value || '';
@@ -631,6 +664,7 @@ async function joinRemoteTableFromPlayer() {
     const table = await VGSync.joinTable(code, { name, role, ready: true });
     localStorage.setItem('vg_role', 'player');
     renderPlayerLobby(table.table);
+    await VGSync.fetchMessages(true);
     VGEngine.resumeSession();
     refreshView();
   } catch (err) {
@@ -643,6 +677,7 @@ async function playerRefreshLobby() {
   if (!window.VGSync) return;
   try {
     const table = await VGSync.fetchLobby();
+    await VGSync.fetchMessages(true);
     renderPlayerLobby(table);
     updatePlayerSyncStatus(VGSync.status());
   } catch (err) {
@@ -661,6 +696,21 @@ async function playerToggleReady() {
   } catch (err) {
     updatePlayerSyncStatus({ ...VGSync.status(), error: err.message });
     showToast(`Ready update failed: ${err.message}`);
+  }
+}
+
+async function playerSendChat() {
+  if (!window.VGSync) return;
+  const input = document.getElementById('playerChatInput');
+  const text = input?.value || '';
+  if (!text.trim()) return;
+  try {
+    await VGSync.sendMessage(text);
+    if (input) input.value = '';
+    renderPlayerChat(VGSync.status().messages);
+  } catch (err) {
+    updatePlayerSyncStatus({ ...VGSync.status(), error: err.message });
+    showToast(`Chat failed: ${err.message}`);
   }
 }
 

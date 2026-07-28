@@ -708,6 +708,14 @@ hr.divider { border: none; border-top: 1px solid var(--border); margin: 24px 0; 
       </div>
       <div id="syncStatus" style="font-size:13px;color:var(--text-dim);line-height:1.7;margin-top:12px;">Remote sync is off.</div>
       <div id="syncLobby" style="display:grid;gap:8px;margin-top:12px;"></div>
+      <div style="margin-top:14px;border-top:1px solid var(--border);padding-top:12px;">
+        <div style="font-family:'Cinzel',serif;color:var(--gold);font-size:12px;letter-spacing:1px;text-transform:uppercase;margin-bottom:8px;">Table Chat</div>
+        <div id="syncChatLog" style="display:grid;gap:8px;max-height:220px;overflow:auto;background:rgba(0,0,0,0.18);border:1px solid var(--border);border-radius:6px;padding:10px;"></div>
+        <div class="flex gap-8" style="margin-top:8px;">
+          <input type="text" id="syncChatInput" placeholder="Message the table..." onkeydown="if(event.key==='Enter') sendSyncChat()">
+          <button class="btn btn-gold btn-sm" onclick="sendSyncChat()" style="white-space:nowrap;">Send</button>
+        </div>
+      </div>
     </div>
     <div class="card">
       <div class="card-title">About</div>
@@ -1153,10 +1161,12 @@ function initRemoteSync() {
     },
     onStatus: updateSyncStatus,
     onLobby: renderSyncLobby,
+    onChat: renderSyncChat,
     onError: err => updateSyncStatus({ ...VGSync.status(), error: err.message }),
   });
   updateSyncStatus(VGSync.status());
   renderSyncLobby(cfg.table);
+  renderSyncChat(cfg.messages || []);
 }
 
 function updateSyncStatus(status = (window.VGSync ? VGSync.status() : null)) {
@@ -1191,6 +1201,28 @@ function renderSyncLobby(table = (window.VGSync ? VGSync.status().table : null))
   `).join('');
 }
 
+function renderSyncChat(messages = (window.VGSync ? VGSync.status().messages : [])) {
+  const el = document.getElementById('syncChatLog');
+  if (!el) return;
+  if (!messages?.length) {
+    el.innerHTML = `<div style="font-size:12px;color:var(--text-muted);font-style:italic;">No table messages yet.</div>`;
+    return;
+  }
+  el.innerHTML = messages.slice(-50).map(message => {
+    const time = message.createdAt ? new Date(message.createdAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }) : '';
+    return `
+      <div style="border-bottom:1px solid rgba(255,255,255,0.04);padding-bottom:7px;">
+        <div style="display:flex;justify-content:space-between;gap:10px;font-size:12px;color:var(--text-muted);">
+          <span><strong style="color:var(--text);">${escHtml(message.name || 'Seated Player')}</strong> · ${escHtml(message.role || 'protagonist')}</span>
+          <span>${escHtml(time)}</span>
+        </div>
+        <div style="font-size:14px;line-height:1.5;color:var(--text-dim);margin-top:3px;">${escHtml(message.text || '')}</div>
+      </div>
+    `;
+  }).join('');
+  el.scrollTop = el.scrollHeight;
+}
+
 function syncInputsToConfig() {
   if (!window.VGSync) return;
   const api = document.getElementById('syncApiBase')?.value || location.origin;
@@ -1209,6 +1241,7 @@ async function createRemoteTable() {
   try {
     const result = await VGSync.createTable('Velvet Grimoire Table');
     document.getElementById('syncTableCode').value = result.table.code;
+    await VGSync.fetchMessages(true);
     toast(`Remote table created: ${result.table.code}`, 'success');
     updateSyncStatus(VGSync.status());
   } catch (err) {
@@ -1227,6 +1260,7 @@ async function joinRemoteTable() {
     VGEngine.resumeSession();
     renderCampaigns();
     renderSession();
+    await VGSync.fetchMessages(true);
     toast(`Joined remote table: ${result.table.code}`, 'success');
     updateSyncStatus(VGSync.status());
   } catch (err) {
@@ -1239,6 +1273,7 @@ async function refreshLobby() {
   if (!window.VGSync) return;
   try {
     const table = await VGSync.fetchLobby();
+    await VGSync.fetchMessages(true);
     renderSyncLobby(table);
     updateSyncStatus(VGSync.status());
   } catch (err) {
@@ -1277,6 +1312,22 @@ function stopSync() {
   VGSync.stop();
   toast('Remote sync stopped.', 'warn');
   updateSyncStatus(VGSync.status());
+}
+
+async function sendSyncChat() {
+  if (!window.VGSync) return;
+  syncInputsToConfig();
+  const input = document.getElementById('syncChatInput');
+  const text = input?.value || '';
+  if (!text.trim()) return;
+  try {
+    await VGSync.sendMessage(text);
+    if (input) input.value = '';
+    renderSyncChat(VGSync.status().messages);
+  } catch (err) {
+    toast(`Chat failed: ${err.message}`, 'error');
+    updateSyncStatus({ ...VGSync.status(), error: err.message });
+  }
 }
 
 function installDemoContent(screenshotMode = false) {

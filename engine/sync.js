@@ -26,6 +26,8 @@ const VGSync = (() => {
   let busy = false;
   let lastTable = null;
   let lastPresenceAt = 0;
+  let lastMessageId = 0;
+  let messages = [];
 
   function uid() {
     return Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
@@ -146,6 +148,8 @@ const VGSync = (() => {
       }),
     });
     lastTable = table;
+    messages = [];
+    lastMessageId = 0;
     const next = saveConfig({ ...config, enabled: true, code: table.code, lastRev: table.rev, role: 'warden', ready: true });
     lastFingerprint = fingerprint(local);
     start(callbacks);
@@ -166,6 +170,8 @@ const VGSync = (() => {
       body: JSON.stringify(playerPayload({ name: playerName, role, ready: !!options.ready })),
     });
     lastTable = joined;
+    messages = [];
+    lastMessageId = 0;
     const next = saveConfig({
       ...config,
       enabled: true,
@@ -204,6 +210,43 @@ const VGSync = (() => {
     callbacks.onLobby?.(table);
     callbacks.onStatus?.(status());
     return table;
+  }
+
+  async function fetchMessages(force = false) {
+    const config = getConfig();
+    if (!config.enabled || !config.code) return [];
+    const payload = await request(`/api/tables/${config.code}/messages?since=${force ? 0 : lastMessageId}`);
+    if (force) messages = [];
+    const incoming = payload.messages || [];
+    if (incoming.length) {
+      const seen = new Set(messages.map(message => message.id));
+      messages = [...messages, ...incoming.filter(message => !seen.has(message.id))].slice(-100);
+      lastMessageId = Math.max(lastMessageId, payload.lastMessageId || 0, ...incoming.map(message => message.id || 0));
+    } else {
+      lastMessageId = Math.max(lastMessageId, payload.lastMessageId || 0);
+    }
+    callbacks.onChat?.(messages);
+    callbacks.onStatus?.(status());
+    return messages;
+  }
+
+  async function sendMessage(text) {
+    const config = getConfig();
+    if (!config.enabled || !config.code) throw new Error('Join or create a table first.');
+    const payload = await request(`/api/tables/${config.code}/messages`, {
+      method: 'POST',
+      body: JSON.stringify({
+        text,
+        player: playerPayload(),
+      }),
+    });
+    const incoming = payload.messages || [];
+    const seen = new Set(messages.map(message => message.id));
+    messages = [...messages, ...incoming.filter(message => !seen.has(message.id))].slice(-100);
+    lastMessageId = Math.max(lastMessageId, payload.lastMessageId || 0, payload.message?.id || 0);
+    callbacks.onChat?.(messages);
+    callbacks.onStatus?.(status());
+    return payload.message;
   }
 
   async function updatePlayer(updates = {}) {
@@ -278,6 +321,7 @@ const VGSync = (() => {
     try {
       await pull();
       await heartbeat();
+      await fetchMessages();
       await push();
     } catch (err) {
       callbacks.onError?.(err);
@@ -316,6 +360,8 @@ const VGSync = (() => {
       ready: !!config.ready,
       canWriteSharedState: canWriteSharedState(),
       permissions: lastTable?.permissions || null,
+      messages,
+      lastMessageId,
       table: lastTable,
       players: lastTable?.players || [],
     };
@@ -335,6 +381,8 @@ const VGSync = (() => {
     joinTable,
     fetchLobby,
     heartbeat,
+    fetchMessages,
+    sendMessage,
     updatePlayer,
     setReady,
     pull,
