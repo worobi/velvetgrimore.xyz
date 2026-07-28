@@ -438,6 +438,9 @@ hr.divider { border: none; border-top: 1px solid var(--border); margin: 24px 0; 
     <button class="sidebar-btn" onclick="showPanel('session')" id="nav-session">
       <span class="icon">⚔️</span> Active Session
     </button>
+    <button class="sidebar-btn" onclick="showPanel('live')" id="nav-live">
+      <span class="icon">◉</span> Live Table
+    </button>
     <button class="sidebar-btn" onclick="showPanel('dice')" id="nav-dice">
       <span class="icon">🎲</span> Dice Roller
     </button>
@@ -566,6 +569,27 @@ hr.divider { border: none; border-top: 1px solid var(--border); margin: 24px 0; 
     <div id="sessionPanel"></div>
   </div>
 
+  <!-- LIVE TABLE -->
+  <div class="panel" id="panel-live">
+    <h2 class="page-title">Live Table</h2>
+    <p class="page-sub">Command center for roster, readiness, player requests, chat, activity, timeline, and exports.</p>
+    <div class="grid-3" style="margin-bottom:16px;">
+      <div class="card">
+        <div class="card-title">Connection</div>
+        <div id="liveSummaryConnection" style="font-size:14px;color:var(--text-dim);line-height:1.7;">Remote sync is off.</div>
+      </div>
+      <div class="card">
+        <div class="card-title">Players</div>
+        <div id="liveSummaryPlayers" style="font-size:14px;color:var(--text-dim);line-height:1.7;">No table joined.</div>
+      </div>
+      <div class="card">
+        <div class="card-title">Pending</div>
+        <div id="liveSummaryPending" style="font-size:14px;color:var(--text-dim);line-height:1.7;">No pending actions.</div>
+      </div>
+    </div>
+    <div id="liveTableMount"></div>
+  </div>
+
   <!-- DICE -->
   <div class="panel" id="panel-dice">
     <h2 class="page-title">Dice Roller</h2>
@@ -690,6 +714,13 @@ hr.divider { border: none; border-top: 1px solid var(--border); margin: 24px 0; 
       </div>
     </div>
     <div class="card">
+      <div class="card-title">Live Multiplayer</div>
+      <p style="font-size:14px;color:var(--text-dim);line-height:1.7;margin-top:8px;">
+        Table codes, player readiness, chat, action approvals, activity, and recap exports now live in the Warden command center.
+      </p>
+      <button class="btn btn-gold mt-16" onclick="showPanel('live')">Open Live Table</button>
+    </div>
+    <div class="card" id="remoteMultiplayerCard">
       <div class="card-title">Remote Multiplayer</div>
       <p style="font-size:14px;color:var(--text-dim);line-height:1.7;margin-top:8px;">
         Create a table code on the VPS backend, then share that code with the player. Sync includes scenes, maps, Compact records, and Intimate Table messages.
@@ -1226,6 +1257,7 @@ function updateSyncStatus(status = (window.VGSync ? VGSync.status() : null)) {
     ? `${state}<br><span style="color:var(--red-bright);">Last error: ${escHtml(status.error)}</span>`
     : state;
   renderSyncLobby(status.table);
+  updateLiveSummary(status);
 }
 
 function renderSyncLobby(table = (window.VGSync ? VGSync.status().table : null)) {
@@ -1658,6 +1690,36 @@ function recordSyncEvent(type, detail = {}, options = {}) {
   });
 }
 
+function mountLiveTablePanel() {
+  const card = document.getElementById('remoteMultiplayerCard');
+  const mount = document.getElementById('liveTableMount');
+  if (card && mount && card.parentElement !== mount) mount.appendChild(card);
+  updateLiveSummary();
+  renderSyncEvents(window.VGSync ? VGSync.status().events : []);
+  renderSyncLobby(window.VGSync ? VGSync.status().table : null);
+  renderSyncChat(window.VGSync ? VGSync.status().messages : []);
+}
+
+function updateLiveSummary(status = (window.VGSync ? VGSync.status() : null)) {
+  const connection = document.getElementById('liveSummaryConnection');
+  const players = document.getElementById('liveSummaryPlayers');
+  const pending = document.getElementById('liveSummaryPending');
+  if (!connection || !players || !pending) return;
+  if (!status || !status.enabled || !status.code) {
+    connection.textContent = 'Remote sync is off.';
+    players.textContent = 'No table joined.';
+    pending.textContent = 'No pending actions.';
+    return;
+  }
+  const tablePlayers = status.players || status.table?.players || [];
+  const ready = tablePlayers.filter(player => player.ready).length;
+  const online = tablePlayers.filter(player => player.online).length;
+  const pendingEvents = (status.events || []).filter(event => event.status === 'pending');
+  connection.textContent = `Table ${status.code} · ${status.liveConnected ? 'live updates on' : status.liveState || 'polling fallback'} · revision ${status.lastRev || 0}`;
+  players.textContent = `${tablePlayers.length} seated · ${online} online · ${ready} ready`;
+  pending.textContent = pendingEvents.length ? `${pendingEvents.length} pending Warden action${pendingEvents.length === 1 ? '' : 's'}` : 'No pending actions.';
+}
+
 function installDemoContent(screenshotMode = false) {
   if (!window.VGDemo) {
     toast('Demo installer is missing.', 'error');
@@ -1684,6 +1746,7 @@ function showPanel(name) {
   document.getElementById('panel-' + name).classList.add('active');
   document.getElementById('nav-' + name)?.classList.add('active');
   if (name === 'session') renderSession();
+  if (name === 'live') mountLiveTablePanel();
   if (name === 'history') renderHistory();
   if (name === 'scenes') renderSceneList();
   if (name === 'templates') renderTemplates();
