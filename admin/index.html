@@ -768,6 +768,28 @@ hr.divider { border: none; border-top: 1px solid var(--border); margin: 24px 0; 
           <input type="text" id="accountNewTables" placeholder="Table codes, comma separated">
           <button class="btn btn-gold btn-sm" onclick="createAccountUser()">Generate User</button>
         </div>
+        <div style="border-top:1px solid var(--border);padding-top:10px;margin-top:10px;display:grid;gap:8px;">
+          <label style="display:flex;gap:8px;align-items:center;font-size:13px;color:var(--text-dim);line-height:1.4;">
+            <input type="checkbox" id="accountGuestToggle" style="width:auto;">
+            Allow guest joins by table code
+          </label>
+          <button class="btn btn-ghost btn-sm" onclick="saveAccountSettings()">Save Access Setting</button>
+        </div>
+        <div style="border-top:1px solid var(--border);padding-top:10px;margin-top:10px;display:grid;gap:8px;">
+          <div style="font-family:'Cinzel',serif;color:var(--gold);font-size:12px;letter-spacing:1px;text-transform:uppercase;">Invite Link</div>
+          <input type="text" id="accountInviteName" placeholder="Display name">
+          <input type="text" id="accountInviteUsername" placeholder="Username, optional">
+          <select id="accountInviteRole">
+            <option value="player">Player</option>
+            <option value="spectator">Spectator</option>
+            <option value="warden">Warden</option>
+            <option value="admin">Admin</option>
+          </select>
+          <input type="text" id="accountInviteTables" placeholder="Table codes, comma separated">
+          <button class="btn btn-gold btn-sm" onclick="createAccountInvite()">Create Invite</button>
+          <div id="accountInviteGenerated" style="font-size:13px;color:var(--gold);line-height:1.6;"></div>
+          <div id="accountInviteList" style="display:grid;gap:8px;max-height:180px;overflow:auto;background:rgba(0,0,0,0.18);border:1px solid var(--border);border-radius:6px;padding:10px;"></div>
+        </div>
         <div id="accountGenerated" style="font-size:13px;color:var(--gold);line-height:1.6;margin-top:8px;"></div>
         <div id="accountUserList" style="display:grid;gap:8px;max-height:260px;overflow:auto;background:rgba(0,0,0,0.18);border:1px solid var(--border);border-radius:6px;padding:10px;margin-top:10px;"></div>
       </div>
@@ -1409,7 +1431,11 @@ async function initAccountAdmin() {
     const session = VGSync.getAccountSession();
     if (session?.token) await VGSync.accountMe().catch(() => null);
     renderAccountAdmin({ setup });
-    if (VGSync.getAccountSession()?.user) await refreshAccountUsers();
+    if (VGSync.getAccountSession()?.user) {
+      await refreshAccountSettings();
+      await refreshAccountUsers();
+      await refreshAccountInvites();
+    }
   } catch (err) {
     const el = document.getElementById('accountStatus');
     if (el) el.textContent = `Account setup unavailable: ${err.message}`;
@@ -1440,7 +1466,9 @@ async function bootstrapOwnerAccount() {
       ? `Owner created. Temporary password: ${payload.temporaryPassword}`
       : 'Owner account created.';
     renderAccountAdmin();
+    await refreshAccountSettings();
     await refreshAccountUsers();
+    await refreshAccountInvites();
     toast('Owner account ready.', 'success');
   } catch (err) {
     toast(`Owner setup failed: ${err.message}`, 'error');
@@ -1455,7 +1483,9 @@ async function loginAccount() {
     await VGSync.accountLogin(username, password);
     document.getElementById('accountGenerated').textContent = '';
     renderAccountAdmin();
+    await refreshAccountSettings();
     await refreshAccountUsers();
+    await refreshAccountInvites();
     toast('Logged in.', 'success');
   } catch (err) {
     toast(`Login failed: ${err.message}`, 'error');
@@ -1466,15 +1496,40 @@ async function logoutAccount() {
   if (!window.VGSync) return;
   await VGSync.accountLogout();
   document.getElementById('accountUserList').innerHTML = '';
+  document.getElementById('accountInviteList').innerHTML = '';
+  document.getElementById('accountInviteGenerated').textContent = '';
   renderAccountAdmin();
   toast('Logged out.', 'warn');
 }
 
-function accountTableCodes() {
-  return (document.getElementById('accountNewTables')?.value || '')
+function accountTableCodes(id = 'accountNewTables') {
+  return (document.getElementById(id)?.value || '')
     .split(',')
     .map(code => code.trim().toUpperCase())
     .filter(Boolean);
+}
+
+async function refreshAccountSettings() {
+  if (!window.VGSync) return;
+  const toggle = document.getElementById('accountGuestToggle');
+  if (!toggle) return;
+  try {
+    const payload = await VGSync.accountSettings();
+    toggle.checked = payload.settings?.allowGuestJoins !== false;
+  } catch (err) {
+    toggle.checked = true;
+  }
+}
+
+async function saveAccountSettings() {
+  if (!window.VGSync) return;
+  const allowGuestJoins = !!document.getElementById('accountGuestToggle')?.checked;
+  try {
+    await VGSync.accountUpdateSettings({ allowGuestJoins });
+    toast(allowGuestJoins ? 'Guest joins enabled.' : 'Guest joins locked to assigned accounts.', 'success');
+  } catch (err) {
+    toast(`Access setting failed: ${err.message}`, 'error');
+  }
 }
 
 async function createAccountUser() {
@@ -1498,6 +1553,66 @@ async function createAccountUser() {
   } catch (err) {
     toast(`User generation failed: ${err.message}`, 'error');
   }
+}
+
+async function createAccountInvite() {
+  if (!window.VGSync) return;
+  const displayName = document.getElementById('accountInviteName')?.value || '';
+  const username = document.getElementById('accountInviteUsername')?.value || '';
+  try {
+    const payload = await VGSync.accountCreateInvite({
+      displayName,
+      username,
+      role: document.getElementById('accountInviteRole')?.value || 'player',
+      tableCodes: accountTableCodes('accountInviteTables'),
+    });
+    const invite = payload.invite;
+    const link = new URL(`/player/?invite=${encodeURIComponent(invite.code)}`, location.origin).toString();
+    document.getElementById('accountInviteGenerated').textContent = `Invite ${invite.code}: ${link}`;
+    ['accountInviteName', 'accountInviteUsername', 'accountInviteTables'].forEach(id => {
+      const el = document.getElementById(id);
+      if (el) el.value = '';
+    });
+    await refreshAccountInvites();
+    toast('Invite created.', 'success');
+  } catch (err) {
+    toast(`Invite failed: ${err.message}`, 'error');
+  }
+}
+
+async function refreshAccountInvites() {
+  if (!window.VGSync) return;
+  const list = document.getElementById('accountInviteList');
+  if (!list) return;
+  try {
+    const payload = await VGSync.accountInvites();
+    renderAccountInviteList(payload.invites || []);
+  } catch (err) {
+    list.innerHTML = `<div style="font-size:12px;color:var(--text-muted);font-style:italic;">${escHtml(err.message)}</div>`;
+  }
+}
+
+function renderAccountInviteList(invites = []) {
+  const list = document.getElementById('accountInviteList');
+  if (!list) return;
+  const activeInvites = invites.filter(invite => invite.active && !invite.usedAt);
+  if (!activeInvites.length) {
+    list.innerHTML = `<div style="font-size:12px;color:var(--text-muted);font-style:italic;">No active invites.</div>`;
+    return;
+  }
+  list.innerHTML = activeInvites.map(invite => `
+    <div style="border-bottom:1px solid rgba(255,255,255,0.04);padding-bottom:8px;">
+      <div style="display:flex;justify-content:space-between;gap:8px;font-size:12px;color:var(--text-muted);">
+        <span><strong style="color:var(--text);">${escHtml(invite.code)}</strong> · ${escHtml(invite.role)} · ${escHtml(invite.displayName || 'Invited Player')}</span>
+        <span>${invite.expiresAt ? escHtml(new Date(invite.expiresAt).toLocaleDateString()) : 'no expiry'}</span>
+      </div>
+      <div style="font-size:12px;color:var(--text-muted);margin-top:3px;">Tables: ${escHtml((invite.tableCodes || []).join(', ') || 'all/manual')}</div>
+      <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:7px;">
+        <button class="btn btn-ghost btn-sm" onclick="copyInviteCode('${escHtml(invite.code)}')">Copy Code</button>
+        <button class="btn btn-ghost btn-sm" onclick="disableAccountInvite('${escHtml(invite.code)}')">Disable</button>
+      </div>
+    </div>
+  `).join('');
 }
 
 async function refreshAccountUsers() {
@@ -1525,13 +1640,47 @@ function renderAccountUserList(users = []) {
         <span><strong style="color:var(--text);">${escHtml(user.displayName || user.username)}</strong> · ${escHtml(user.username)} · ${escHtml(user.role)}</span>
         <span style="color:${user.active ? '#9edc9e' : '#ff8888'};">${user.active ? 'active' : 'disabled'}</span>
       </div>
-      <div style="font-size:12px;color:var(--text-muted);margin-top:3px;">Tables: ${escHtml((user.tableCodes || []).join(', ') || 'all/manual')}</div>
+      <div style="display:grid;grid-template-columns:minmax(0,1fr) auto;gap:6px;margin-top:7px;align-items:center;">
+        <input type="text" id="accountTables-${escHtml(user.id)}" value="${escHtml((user.tableCodes || []).join(', '))}" placeholder="Table codes">
+        <button class="btn btn-ghost btn-sm" onclick="saveAccountTables('${escHtml(user.id)}')">Save Tables</button>
+      </div>
       <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:7px;">
         <button class="btn btn-ghost btn-sm" onclick="resetAccountPassword('${escHtml(user.id)}')">Reset</button>
         <button class="btn btn-ghost btn-sm" onclick="toggleAccountActive('${escHtml(user.id)}', ${user.active ? 'false' : 'true'})">${user.active ? 'Disable' : 'Enable'}</button>
       </div>
     </div>
   `).join('');
+}
+
+async function saveAccountTables(userId) {
+  if (!window.VGSync) return;
+  try {
+    await VGSync.accountUpdateUser(userId, { tableCodes: accountTableCodes(`accountTables-${userId}`) });
+    await refreshAccountUsers();
+    toast('Table assignments saved.', 'success');
+  } catch (err) {
+    toast(`Assignment failed: ${err.message}`, 'error');
+  }
+}
+
+async function disableAccountInvite(code) {
+  if (!window.VGSync) return;
+  try {
+    await VGSync.accountUpdateInvite(code, { active: false });
+    await refreshAccountInvites();
+    toast('Invite disabled.', 'warn');
+  } catch (err) {
+    toast(`Invite update failed: ${err.message}`, 'error');
+  }
+}
+
+async function copyInviteCode(code) {
+  try {
+    await navigator.clipboard.writeText(code);
+    toast('Invite code copied.', 'success');
+  } catch (err) {
+    document.getElementById('accountInviteGenerated').textContent = `Invite code: ${code}`;
+  }
 }
 
 async function resetAccountPassword(userId) {

@@ -365,6 +365,25 @@ textarea.npc-response:focus { border-color: var(--border-hot); }
         <button class="btn btn-purple" onclick="playerAccountLogin()">Login</button>
         <button class="btn btn-ghost" onclick="playerAccountLogout()">Logout</button>
       </div>
+      <div class="remote-join-row">
+        <select id="playerAssignedTable" style="background:rgba(255,255,255,0.035);border:1px solid var(--border);border-radius:4px;padding:10px 12px;color:var(--text);">
+          <option value="">No assigned tables</option>
+        </select>
+        <button class="btn btn-purple" onclick="playerJoinAssignedTable()">Join Assigned</button>
+      </div>
+      <div style="display:grid;gap:8px;border-top:1px solid var(--border);padding-top:10px;">
+        <div style="font-family:'Cinzel',serif;color:var(--gold);font-size:12px;letter-spacing:1px;text-transform:uppercase;">Accept Invite</div>
+        <div class="remote-join-row">
+          <input type="text" id="playerInviteCode" placeholder="Invite code">
+          <input type="text" id="playerInviteName" placeholder="Display name">
+        </div>
+        <div class="remote-join-row">
+          <input type="text" id="playerInviteUsername" placeholder="Username">
+          <input type="password" id="playerInvitePassword" placeholder="Password, optional" onkeydown="if(event.key==='Enter') playerAcceptInvite()">
+          <button class="btn btn-purple" onclick="playerAcceptInvite()">Accept</button>
+        </div>
+        <div id="playerInviteResult" style="font-size:13px;color:var(--gold);line-height:1.5;"></div>
+      </div>
     </div>
     <div id="playerSyncStatus" style="font-size:13px;color:var(--text-muted);margin-bottom:10px;"></div>
     <div class="summary-grid" style="margin-bottom:12px;">
@@ -709,6 +728,11 @@ function initRemoteSync() {
 
 async function initPlayerAccount() {
   if (!window.VGSync) return;
+  const params = new URLSearchParams(location.search);
+  const inviteCode = params.get('invite');
+  if (inviteCode && document.getElementById('playerInviteCode')) {
+    document.getElementById('playerInviteCode').value = inviteCode.toUpperCase();
+  }
   const session = VGSync.getAccountSession();
   if (session?.token) await VGSync.accountMe().catch(() => null);
   renderPlayerAccount();
@@ -719,6 +743,28 @@ function renderPlayerAccount() {
   if (!el || !window.VGSync) return;
   const user = VGSync.getAccountSession()?.user;
   el.textContent = user ? `Logged in as ${user.displayName || user.username} · ${user.role}` : 'Not logged in.';
+  const nameInput = document.getElementById('playerSyncName');
+  if (nameInput && user?.displayName) nameInput.value = user.displayName;
+  const roleSelect = document.getElementById('playerSyncRole');
+  if (roleSelect && user) roleSelect.value = user.role === 'spectator' ? 'spectator' : 'protagonist';
+  renderAssignedTables(user);
+}
+
+function renderAssignedTables(user = (window.VGSync ? VGSync.getAccountSession()?.user : null)) {
+  const select = document.getElementById('playerAssignedTable');
+  if (!select) return;
+  const tables = user && !['owner', 'admin'].includes(user.role) && Array.isArray(user.tableCodes) ? user.tableCodes : [];
+  if (!user) {
+    select.innerHTML = '<option value="">Login to see assigned tables</option>';
+    return;
+  }
+  if (!tables.length) {
+    select.innerHTML = ['owner', 'admin'].includes(user.role)
+      ? '<option value="">Admin can enter any table code</option>'
+      : '<option value="">No assigned tables</option>';
+    return;
+  }
+  select.innerHTML = tables.map(code => `<option value="${escapeHtml(code)}">${escapeHtml(code)}</option>`).join('');
 }
 
 async function playerAccountLogin() {
@@ -729,6 +775,8 @@ async function playerAccountLogin() {
     await VGSync.accountLogin(username, password);
     renderPlayerAccount();
     updatePlayerSyncStatus(VGSync.status());
+    const passwordInput = document.getElementById('playerAccountPassword');
+    if (passwordInput) passwordInput.value = '';
     showToast('Logged in.');
   } catch (err) {
     showToast(`Login failed: ${err.message}`);
@@ -741,6 +789,46 @@ async function playerAccountLogout() {
   renderPlayerAccount();
   updatePlayerSyncStatus(VGSync.status());
   showToast('Logged out.');
+}
+
+async function playerAcceptInvite() {
+  if (!window.VGSync) return;
+  const result = document.getElementById('playerInviteResult');
+  try {
+    const payload = await VGSync.accountAcceptInvite({
+      code: document.getElementById('playerInviteCode')?.value || '',
+      displayName: document.getElementById('playerInviteName')?.value || '',
+      username: document.getElementById('playerInviteUsername')?.value || '',
+      password: document.getElementById('playerInvitePassword')?.value || '',
+    });
+    renderPlayerAccount();
+    updatePlayerSyncStatus(VGSync.status());
+    if (result) {
+      result.textContent = payload.temporaryPassword
+        ? `Invite accepted. Temporary password: ${payload.temporaryPassword}`
+        : 'Invite accepted. You are logged in.';
+    }
+    ['playerInviteCode', 'playerInviteName', 'playerInviteUsername', 'playerInvitePassword'].forEach(id => {
+      const el = document.getElementById(id);
+      if (el) el.value = '';
+    });
+    showToast('Invite accepted.');
+  } catch (err) {
+    if (result) result.textContent = '';
+    showToast(`Invite failed: ${err.message}`);
+  }
+}
+
+async function playerJoinAssignedTable() {
+  if (!window.VGSync) return;
+  const code = document.getElementById('playerAssignedTable')?.value || '';
+  if (!code) {
+    showToast('No assigned table selected.');
+    return;
+  }
+  const codeInput = document.getElementById('playerSyncCode');
+  if (codeInput) codeInput.value = code;
+  await joinRemoteTableCodeFromPlayer(code);
 }
 
 function updatePlayerSyncStatus(status = (window.VGSync ? VGSync.status() : null)) {
@@ -1063,6 +1151,11 @@ function renderPlayerRequestTracker(events = (window.VGSync ? VGSync.status().ev
 async function joinRemoteTableFromPlayer() {
   if (!window.VGSync) return;
   const code = document.getElementById('playerSyncCode')?.value || '';
+  await joinRemoteTableCodeFromPlayer(code);
+}
+
+async function joinRemoteTableCodeFromPlayer(code) {
+  if (!window.VGSync) return;
   const name = document.getElementById('playerSyncName')?.value || 'Protagonist';
   const role = document.getElementById('playerSyncRole')?.value || 'protagonist';
   try {

@@ -237,10 +237,12 @@ const VGSync = (() => {
   function streamUrl(config = getConfig()) {
     const base = new URL(config.apiBase || location.origin, location.href);
     const url = new URL(`/api/tables/${config.code}/stream`, base);
+    const account = getAccountSession();
     url.searchParams.set('clientId', effectiveClientId(config));
     url.searchParams.set('role', syncRoleToTableRole(config.role));
     url.searchParams.set('lastMessageId', String(lastMessageId || 0));
     url.searchParams.set('lastEventId', String(lastEventId || 0));
+    if (account?.token) url.searchParams.set('token', account.token);
     if (canWriteSharedState()) url.searchParams.set('pending', '1');
     return url.toString();
   }
@@ -755,6 +757,17 @@ const VGSync = (() => {
     return request('/api/accounts/users');
   }
 
+  async function accountSettings() {
+    return request('/api/accounts/settings');
+  }
+
+  async function accountUpdateSettings(updates = {}) {
+    return request('/api/accounts/settings', {
+      method: 'PATCH',
+      body: JSON.stringify(updates),
+    });
+  }
+
   async function accountCreateUser(input = {}) {
     return request('/api/accounts/users', {
       method: 'POST',
@@ -773,6 +786,48 @@ const VGSync = (() => {
     return request('/api/accounts/audit');
   }
 
+  async function accountInvites() {
+    return request('/api/accounts/invites');
+  }
+
+  async function accountCreateInvite(input = {}) {
+    return request('/api/accounts/invites', {
+      method: 'POST',
+      body: JSON.stringify(input),
+    });
+  }
+
+  async function accountUpdateInvite(code, updates = {}) {
+    return request(`/api/accounts/invites/${encodeURIComponent(code)}`, {
+      method: 'PATCH',
+      body: JSON.stringify(updates),
+    });
+  }
+
+  async function accountAcceptInvite(input = {}) {
+    const payload = await request('/api/accounts/invites/accept', {
+      method: 'POST',
+      body: JSON.stringify(input),
+    });
+    saveAccountSession({ token: payload.token, user: payload.user });
+    const config = getConfig();
+    saveConfig({
+      ...config,
+      playerName: payload.user?.displayName || config.playerName,
+      role: accountRoleToTableRole(payload.user?.role || config.role),
+    });
+    callbacks.onAccount?.(payload.user);
+    callbacks.onStatus?.(status());
+    return payload;
+  }
+
+  function assignedTables() {
+    const user = getAccountSession()?.user || null;
+    if (!user) return [];
+    if (['owner', 'admin'].includes(user.role)) return [];
+    return Array.isArray(user.tableCodes) ? user.tableCodes : [];
+  }
+
   async function updatePlayer(updates = {}) {
     const config = getConfig();
     if (!config.code) throw new Error('Join or create a table first.');
@@ -783,7 +838,7 @@ const VGSync = (() => {
       role: updates.role || config.role,
       ready: updates.ready === undefined ? !!config.ready : !!updates.ready,
     });
-    const table = await request(`/api/tables/${config.code}/players/${encodeURIComponent(config.clientId)}`, {
+    const table = await request(`/api/tables/${config.code}/players/${encodeURIComponent(effectiveClientId(config))}`, {
       method: 'PATCH',
       body: JSON.stringify(playerPayload({
         name: nextConfig.playerName,
@@ -961,9 +1016,16 @@ const VGSync = (() => {
     accountLogout,
     accountMe,
     accountUsers,
+    accountSettings,
+    accountUpdateSettings,
     accountCreateUser,
     accountUpdateUser,
     accountAudit,
+    accountInvites,
+    accountCreateInvite,
+    accountUpdateInvite,
+    accountAcceptInvite,
+    assignedTables,
     updatePlayer,
     setReady,
     pull,
