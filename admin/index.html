@@ -709,6 +709,10 @@ hr.divider { border: none; border-top: 1px solid var(--border); margin: 24px 0; 
       <div id="syncStatus" style="font-size:13px;color:var(--text-dim);line-height:1.7;margin-top:12px;">Remote sync is off.</div>
       <div id="syncLobby" style="display:grid;gap:8px;margin-top:12px;"></div>
       <div style="margin-top:14px;border-top:1px solid var(--border);padding-top:12px;">
+        <div style="font-family:'Cinzel',serif;color:var(--gold);font-size:12px;letter-spacing:1px;text-transform:uppercase;margin-bottom:8px;">Warden Action Queue</div>
+        <div id="syncActionQueue" style="display:grid;gap:8px;background:rgba(0,0,0,0.18);border:1px solid var(--border);border-radius:6px;padding:10px;"></div>
+      </div>
+      <div style="margin-top:14px;border-top:1px solid var(--border);padding-top:12px;">
         <div style="font-family:'Cinzel',serif;color:var(--gold);font-size:12px;letter-spacing:1px;text-transform:uppercase;margin-bottom:8px;">Activity Feed</div>
         <div id="syncEventRail" style="display:grid;gap:8px;max-height:260px;overflow:auto;background:rgba(0,0,0,0.18);border:1px solid var(--border);border-radius:6px;padding:10px;"></div>
       </div>
@@ -1245,13 +1249,52 @@ function eventLabel(event) {
     'intimacy.card': 'Card',
     'movement.request': 'Move',
     'note.added': 'Note',
+    'action.applied': 'Applied',
+    'action.rejected': 'Rejected',
   };
   return labels[event.type] || 'Event';
+}
+
+function actionRequestSummary(event) {
+  const d = event.detail || {};
+  if (event.type === 'movement.request') {
+    if (d.direction) return `Move ${d.direction}${d.mapName ? ` on ${d.mapName}` : ''}`;
+    if (d.x !== undefined && d.y !== undefined) return `Move to ${d.x},${d.y}${d.mapName ? ` on ${d.mapName}` : ''}`;
+    return 'Movement request';
+  }
+  if (event.type === 'map.reveal') return `${d.action || 'Reveal map'}${d.mapName ? `: ${d.mapName}` : ''}`;
+  if (event.type === 'scene.change') return `Scene change${d.sceneTitle ? `: ${d.sceneTitle}` : ''}`;
+  return event.text || event.type;
+}
+
+function renderSyncActionQueue(events = (window.VGSync ? VGSync.status().events : [])) {
+  const el = document.getElementById('syncActionQueue');
+  if (!el) return;
+  const pending = (events || []).filter(event => event.status === 'pending').slice(-20).reverse();
+  if (!pending.length) {
+    el.innerHTML = `<div style="font-size:12px;color:var(--text-muted);font-style:italic;">No pending player actions.</div>`;
+    return;
+  }
+  el.innerHTML = pending.map(event => `
+    <div style="border:1px solid rgba(200,160,96,0.25);border-radius:6px;padding:9px 10px;background:rgba(200,160,96,0.06);">
+      <div style="display:flex;justify-content:space-between;gap:10px;font-size:12px;color:var(--text-muted);">
+        <span><strong style="color:var(--gold);">${escHtml(eventLabel(event))}</strong> · ${escHtml(event.name || 'Seated Player')}</span>
+        <span>${escHtml(event.createdAt ? new Date(event.createdAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }) : '')}</span>
+      </div>
+      <div style="font-size:14px;line-height:1.5;color:var(--text);margin-top:4px;">${escHtml(actionRequestSummary(event))}</div>
+      <div style="font-size:12px;color:var(--text-muted);margin-top:3px;">${escHtml(event.text || '')}</div>
+      <div style="display:flex;gap:6px;margin-top:8px;">
+        <button class="btn btn-gold btn-sm" onclick="reviewSyncEvent(${event.id}, 'approve')">Approve & Apply</button>
+        <button class="btn btn-ghost btn-sm" onclick="reviewSyncEvent(${event.id}, 'reject')">Reject</button>
+      </div>
+    </div>
+  `).join('');
 }
 
 function renderSyncEvents(events = (window.VGSync ? VGSync.status().events : [])) {
   const el = document.getElementById('syncEventRail');
   if (!el) return;
+  renderSyncActionQueue(events);
   if (!events?.length) {
     el.innerHTML = `<div style="font-size:12px;color:var(--text-muted);font-style:italic;">No table activity yet.</div>`;
     return;

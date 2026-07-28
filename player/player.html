@@ -359,6 +359,18 @@ textarea.npc-response:focus { border-color: var(--border-hot); }
     <div style="font-family:'Cinzel',serif;color:var(--gold);font-size:14px;letter-spacing:1px;margin-bottom:6px;">Table Chat</div>
     <div id="playerSyncStatus" style="font-size:13px;color:var(--text-muted);margin-bottom:10px;"></div>
     <div id="playerSyncLobby" style="display:grid;gap:8px;margin-bottom:12px;"></div>
+    <div style="font-family:'Cinzel',serif;color:var(--gold);font-size:12px;letter-spacing:1px;text-transform:uppercase;margin-bottom:8px;">Table Requests</div>
+    <div style="display:grid;gap:8px;margin-bottom:12px;background:rgba(0,0,0,0.18);border:1px solid var(--border);border-radius:6px;padding:10px;">
+      <div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px;">
+        <button class="btn btn-ghost btn-sm" onclick="requestMove('north')">Move N</button>
+        <button class="btn btn-ghost btn-sm" onclick="requestMove('east')">Move E</button>
+        <button class="btn btn-ghost btn-sm" onclick="requestMove('south')">Move S</button>
+        <button class="btn btn-ghost btn-sm" onclick="requestMove('west')">Move W</button>
+        <button class="btn btn-ghost btn-sm" onclick="requestMapReveal()">Reveal</button>
+        <button class="btn btn-ghost btn-sm" onclick="requestSceneInteraction()">Scene</button>
+      </div>
+      <input type="text" id="playerRequestNote" placeholder="Optional request note..." style="width:100%;">
+    </div>
     <div style="font-family:'Cinzel',serif;color:var(--gold);font-size:12px;letter-spacing:1px;text-transform:uppercase;margin-bottom:8px;">Activity Feed</div>
     <div id="playerEventRail" style="display:grid;gap:8px;max-height:220px;overflow:auto;background:rgba(0,0,0,0.18);border:1px solid var(--border);border-radius:6px;padding:10px;margin-bottom:12px;"></div>
     <div id="playerChatLog" style="display:grid;gap:8px;max-height:220px;overflow:auto;background:rgba(0,0,0,0.18);border:1px solid var(--border);border-radius:6px;padding:10px;"></div>
@@ -565,6 +577,17 @@ function render(session) {
     <div class="npc-cue-label">🎭 Your Character Cue (Private — for you only)</div>
     <div class="npc-cue">${scene.npcCue || '[No NPC cue written for this scene]'}</div>
 
+    <div style="margin:18px 0;padding:14px;border:1px solid var(--border);border-radius:6px;background:rgba(0,0,0,0.18);">
+      <div style="font-family:'Cinzel',serif;color:var(--gold);font-size:12px;letter-spacing:1px;text-transform:uppercase;margin-bottom:8px;">Scene Requests</div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;">
+        ${['fight','flight','fawn','freeze'].map(branch => {
+          const target = scene.branches?.[branch]?.nextSceneId;
+          const label = scene.branches?.[branch]?.label || branch;
+          return `<button class="btn btn-ghost btn-sm" ${target ? '' : 'disabled style="opacity:0.45;cursor:not-allowed;"'} onclick="requestSceneBranch('${branch}')">${escapeHtml(label)}</button>`;
+        }).join('')}
+      </div>
+    </div>
+
     <div class="dice-area ${holdActive ? 'locked' : ''}">
       <div class="dice-label">Your Dice Roller</div>
       <div class="dice-row">
@@ -675,6 +698,8 @@ function playerEventLabel(event) {
     'intimacy.card': 'Card',
     'movement.request': 'Move',
     'note.added': 'Note',
+    'action.applied': 'Applied',
+    'action.rejected': 'Rejected',
   };
   return labels[event.type] || 'Event';
 }
@@ -768,6 +793,89 @@ function recordPlayerEvent(type, detail = {}, options = {}) {
   VGSync.recordEvent(type, detail, options).catch(err => {
     console.warn('Event feed update failed:', err.message);
   });
+}
+
+function activePlayerMap() {
+  try {
+    const maps = JSON.parse(localStorage.getItem('vg_maps') || '[]');
+    const activeId = localStorage.getItem('vg_active_map_id');
+    return maps.find(map => map.id === activeId) || maps[0] || null;
+  } catch (e) {
+    return null;
+  }
+}
+
+function playerRequestNote() {
+  return document.getElementById('playerRequestNote')?.value?.trim() || '';
+}
+
+function requestMove(direction) {
+  const map = activePlayerMap();
+  const note = playerRequestNote();
+  recordPlayerEvent('movement.request', {
+    direction,
+    mapId: map?.id || null,
+    mapName: map?.name || null,
+    note,
+  }, {
+    approvalRequired: true,
+    text: `Requested movement ${direction}${map?.name ? ` on ${map.name}` : ''}${note ? `: ${note}` : '.'}`,
+  });
+  showToast('Movement request sent to the Warden.');
+}
+
+function requestMapReveal() {
+  const map = activePlayerMap();
+  const note = playerRequestNote();
+  recordPlayerEvent('map.reveal', {
+    action: 'reveal-around',
+    mapId: map?.id || null,
+    mapName: map?.name || null,
+    note,
+  }, {
+    approvalRequired: true,
+    text: `Requested a map reveal${map?.name ? ` on ${map.name}` : ''}${note ? `: ${note}` : '.'}`,
+  });
+  showToast('Map reveal request sent to the Warden.');
+}
+
+function requestSceneInteraction() {
+  const scene = VGEngine.getCurrentScene();
+  const note = playerRequestNote();
+  recordPlayerEvent('note.added', {
+    sceneId: scene?.id || null,
+    sceneTitle: scene?.title || null,
+    action: 'player-interaction-request',
+    note,
+  }, {
+    approvalRequired: true,
+    text: `Requested scene attention${scene?.title ? ` for ${scene.title}` : ''}${note ? `: ${note}` : '.'}`,
+  });
+  showToast('Scene request sent to the Warden.');
+}
+
+function requestSceneBranch(branch) {
+  const scene = VGEngine.getCurrentScene();
+  const campaign = VGEngine.getState().campaign;
+  const targetId = scene?.branches?.[branch]?.nextSceneId || null;
+  const target = campaign?.scenes?.find(item => item.id === targetId) || null;
+  if (!targetId) {
+    showToast('That branch does not have a target scene yet.');
+    return;
+  }
+  const note = playerRequestNote();
+  recordPlayerEvent('scene.change', {
+    fromSceneId: scene.id,
+    fromSceneTitle: scene.title,
+    sceneId: targetId,
+    sceneTitle: target?.title || targetId,
+    branch,
+    note,
+  }, {
+    approvalRequired: true,
+    text: `Requested ${branch} branch${target?.title ? ` to ${target.title}` : ''}${note ? `: ${note}` : '.'}`,
+  });
+  showToast('Scene branch request sent to the Warden.');
 }
 
 function playerRollDie(sides) {

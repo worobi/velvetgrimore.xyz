@@ -29,8 +29,11 @@ const EVENT_TYPES = new Set([
   'intimacy.card',
   'movement.request',
   'note.added',
+  'action.applied',
+  'action.rejected',
 ]);
-const SENSITIVE_EVENT_TYPES = new Set(['map.reveal', 'movement.request']);
+const SENSITIVE_EVENT_TYPES = new Set(['map.reveal', 'movement.request', 'scene.change']);
+const APPLY_EVENT_TYPES = new Set(['map.reveal', 'movement.request', 'scene.change']);
 
 const MIME = {
   '.html': 'text/html; charset=utf-8',
@@ -135,6 +138,8 @@ function normalizeTable(table) {
     createdAt: event.createdAt || now,
     approvedAt: event.approvedAt || null,
     approvedBy: event.approvedBy || null,
+    appliedAt: event.appliedAt || null,
+    applyResult: event.applyResult && typeof event.applyResult === 'object' && !Array.isArray(event.applyResult) ? event.applyResult : null,
   })).slice(-MAX_EVENTS);
   table.evtSeq = Math.max(table.evtSeq, ...table.events.map(event => event.id), 0);
   return table;
@@ -290,7 +295,186 @@ function activityText(type, player, detail = {}) {
   if (type === 'intimacy.message') return `${name} sent an Intimate Table message.`;
   if (type === 'intimacy.card') return `${name} updated an Intimate Table card.`;
   if (type === 'movement.request') return `${name} requested movement.`;
+  if (type === 'action.applied') return `${name} applied an approved table action.`;
+  if (type === 'action.rejected') return `${name} rejected a table action.`;
   return `${name} added a table note.`;
+}
+
+function readSnapshotJSON(table, key, fallback) {
+  const raw = table.snapshot?.keys?.[key];
+  if (!raw) return fallback;
+  try { return JSON.parse(raw); }
+  catch (err) { return fallback; }
+}
+
+function writeSnapshotJSON(table, key, value) {
+  if (!table.snapshot || typeof table.snapshot !== 'object') table.snapshot = {};
+  if (!table.snapshot.keys || typeof table.snapshot.keys !== 'object') table.snapshot.keys = {};
+  table.snapshot.keys[key] = JSON.stringify(value);
+}
+
+function setSnapshotValue(table, key, value) {
+  if (!table.snapshot || typeof table.snapshot !== 'object') table.snapshot = {};
+  if (!table.snapshot.keys || typeof table.snapshot.keys !== 'object') table.snapshot.keys = {};
+  table.snapshot.keys[key] = value == null ? null : String(value);
+}
+
+function mapTile(map, x, y) {
+  return Array.isArray(map.tiles) ? map.tiles.find(tile => tile.x === x && tile.y === y) : null;
+}
+
+function mapCanMove(map, x, y) {
+  if (!map || x < 0 || y < 0 || x >= map.cols || y >= map.rows) return false;
+  const tile = mapTile(map, x, y);
+  if (!tile) return false;
+  return !['wall', 'water', 'void'].includes(tile.type);
+}
+
+function revealAround(map, cx, cy, radius = 4) {
+  if (!Array.isArray(map.revealedTiles)) map.revealedTiles = [];
+  for (let dy = -radius; dy <= radius; dy++) {
+    for (let dx = -radius; dx <= radius; dx++) {
+      const dist = Math.sqrt(dx * dx + dy * dy);
+      if (dist <= radius) {
+        const x = cx + dx;
+        const y = cy + dy;
+        if (x < 0 || y < 0 || x >= map.cols || y >= map.rows) continue;
+        const key = `${x},${y}`;
+        if (!map.revealedTiles.includes(key)) map.revealedTiles.push(key);
+      }
+    }
+  }
+}
+
+function moveSnapshotParty(map, detail = {}) {
+  const current = map.partyPos || { x: 1, y: 1 };
+  const directions = {
+    north: [0, -1],
+    south: [0, 1],
+    west: [-1, 0],
+    east: [1, 0],
+  };
+  const dir = String(detail.direction || '').toLowerCase();
+  const delta = directions[dir] || [Number(detail.dx || 0), Number(detail.dy || 0)];
+  const x = Number.isFinite(Number(detail.x)) ? Number(detail.x) : Number(current.x || 0) + delta[0];
+  const y = Number.isFinite(Number(detail.y)) ? Number(detail.y) : Number(current.y || 0) + delta[1];
+  const override = !!detail.override;
+  if (!override && !mapCanMove(map, x, y)) {
+    return { applied: false, reason: 'Target tile is blocked or outside the map.' };
+  }
+  map.partyPos = { x, y };
+  revealAround(map, x, y, Number(map.sightRadius || 4));
+  const tile = mapTile(map, x, y);
+  if (tile?.zoneId && Array.isArray(map.zones)) {
+    const zone = map.zones.find(item => item.id === tile.zoneId);
+    if (zone) zone.isDiscovered = true;
+  }
+  let triggeredEvent = null;
+  if (Array.isArray(map.events)) {
+    triggeredEvent = map.events.find(item => item.x === x && item.y === y) || null;
+    if (triggeredEvent && (!triggeredEvent.triggered || triggeredEvent.repeatable)) {
+      triggeredEvent.triggered = true;
+      triggeredEvent.triggerCount = Number(triggeredEvent.triggerCount || 0) + 1;
+    }
+  }
+  return {
+    applied: true,
+    summary: `Party moved to ${x},${y}${map.name ? ` on ${map.name}` : ''}.`,
+    detail: { x, y, mapId: map.id || null, mapName: map.name || null, eventLabel: triggeredEvent?.label || null },
+  };
+}
+
+function revealSnapshotMap(map, detail = {}) {
+  const action = detail.action || 'reveal-around';
+  if (!Array.isArray(map.revealedTiles)) map.revealedTiles = [];
+  if (action === 'reveal-all') {
+    (map.tiles || []).forEach(tile => {
+      const key = `${tile.x},${tile.y}`;
+      if (!map.revealedTiles.includes(key)) map.revealedTiles.push(key);
+    });
+    return { applied: true, summary: `Revealed all of ${map.name || 'the active map'}.`, detail: { action, mapId: map.id || null, mapName: map.name || null } };
+  }
+  if (action === 'reset-fog') {
+    map.revealedTiles = [];
+    revealAround(map, map.partyPos?.x || 1, map.partyPos?.y || 1, Number(map.sightRadius || 4));
+    return { applied: true, summary: `Reset fog on ${map.name || 'the active map'}.`, detail: { action, mapId: map.id || null, mapName: map.name || null } };
+  }
+  revealAround(map, Number(detail.x ?? map.partyPos?.x ?? 1), Number(detail.y ?? map.partyPos?.y ?? 1), Number(detail.radius || map.sightRadius || 4));
+  return { applied: true, summary: `Revealed nearby tiles on ${map.name || 'the active map'}.`, detail: { action, mapId: map.id || null, mapName: map.name || null } };
+}
+
+function applyMapAction(table, event) {
+  const maps = readSnapshotJSON(table, 'vg_maps', []);
+  if (!Array.isArray(maps) || !maps.length) return { applied: false, reason: 'No shared map is available.' };
+  const activeMapId = event.detail.mapId || table.snapshot?.keys?.vg_active_map_id || maps[0]?.id;
+  const index = maps.findIndex(map => map.id === activeMapId);
+  if (index < 0) return { applied: false, reason: 'Requested map is not in the shared table state.' };
+  const map = maps[index];
+  const result = event.type === 'movement.request' ? moveSnapshotParty(map, event.detail) : revealSnapshotMap(map, event.detail);
+  if (!result.applied) return result;
+  map.updatedAt = Date.now();
+  maps[index] = map;
+  writeSnapshotJSON(table, 'vg_maps', maps);
+  setSnapshotValue(table, 'vg_active_map_id', map.id || activeMapId);
+  return result;
+}
+
+function applySceneAction(table, event) {
+  const sceneId = String(event.detail.sceneId || '').trim();
+  if (!sceneId) return { applied: false, reason: 'No target scene was supplied.' };
+  const session = readSnapshotJSON(table, 'vg_session', null);
+  if (!session || typeof session !== 'object') return { applied: false, reason: 'No active shared session is available.' };
+  const previousSceneId = session.currentSceneId || null;
+  if (!Array.isArray(session.history)) session.history = [];
+  if (previousSceneId) {
+    session.history.push({
+      sceneId: previousSceneId,
+      choiceMade: event.detail.branch || event.detail.action || 'warden-approved',
+      roll: event.detail.roll || null,
+      timestamp: Date.now(),
+    });
+  }
+  session.currentSceneId = sceneId;
+  session.lastSaved = Date.now();
+  writeSnapshotJSON(table, 'vg_session', session);
+  return {
+    applied: true,
+    summary: `Scene changed to ${event.detail.sceneTitle || sceneId}.`,
+    detail: { sceneId, sceneTitle: event.detail.sceneTitle || null, previousSceneId },
+  };
+}
+
+function applyApprovedAction(table, event, player) {
+  if (!APPLY_EVENT_TYPES.has(event.type)) {
+    const result = { applied: true, summary: `${player.name || 'Warden'} accepted ${event.name || 'a player'}'s request.`, detail: { sourceEventId: event.id, sourceType: event.type } };
+    event.appliedAt = new Date().toISOString();
+    event.applyResult = result;
+    addEvent(table, {
+      type: 'action.applied',
+      text: result.summary,
+      detail: result.detail,
+    }, player);
+    return result;
+  }
+  const result = event.type === 'scene.change' ? applySceneAction(table, event) : applyMapAction(table, event);
+  event.appliedAt = new Date().toISOString();
+  event.applyResult = result;
+  if (result.applied) {
+    table.rev += 1;
+    table.updatedBy = player.id;
+    addEvent(table, {
+      type: 'action.applied',
+      text: result.summary || `${player.name} applied an approved table action.`,
+      detail: { sourceEventId: event.id, sourceType: event.type, ...(result.detail || {}) },
+    }, player);
+  } else {
+    addEvent(table, {
+      type: 'note.added',
+      text: `Approved action could not apply: ${result.reason || 'No apply rule matched.'}`,
+      detail: { sourceEventId: event.id, sourceType: event.type, applyFailed: true },
+    }, player);
+  }
+  return result;
 }
 
 function send(res, status, body, headers = {}) {
@@ -609,6 +793,15 @@ async function handleApi(req, res, pathname) {
       event.status = action === 'approve' ? 'approved' : 'rejected';
       event.approvedAt = new Date().toISOString();
       event.approvedBy = player.id;
+      if (action === 'approve') {
+        applyApprovedAction(table, event, player);
+      } else {
+        addEvent(table, {
+          type: 'action.rejected',
+          text: `${player.name || 'Warden'} rejected ${event.name || 'a player'}'s ${event.type.replace('.', ' ')} request.`,
+          detail: { sourceEventId: event.id, sourceType: event.type },
+        }, player);
+      }
       data.tables[tableCode] = table;
       writeTables(data);
       broadcastTable(tableCode, `event.${event.status}`, table);
