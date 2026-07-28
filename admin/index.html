@@ -744,6 +744,19 @@ hr.divider { border: none; border-top: 1px solid var(--border); margin: 24px 0; 
       <div id="syncStatus" style="font-size:13px;color:var(--text-dim);line-height:1.7;margin-top:12px;">Remote sync is off.</div>
       <div id="syncLobby" style="display:grid;gap:8px;margin-top:12px;"></div>
       <div style="margin-top:14px;border-top:1px solid var(--border);padding-top:12px;">
+        <div style="display:flex;justify-content:space-between;gap:10px;align-items:center;margin-bottom:8px;">
+          <div style="font-family:'Cinzel',serif;color:var(--gold);font-size:12px;letter-spacing:1px;text-transform:uppercase;">Session Checkpoints</div>
+          <button class="btn btn-ghost btn-sm" onclick="refreshSyncCheckpoints()">Refresh</button>
+        </div>
+        <div id="syncResumeSummary" style="font-size:13px;color:var(--text-dim);line-height:1.6;margin-bottom:8px;">No resume point loaded.</div>
+        <div class="flex gap-8" style="flex-wrap:wrap;margin-bottom:8px;">
+          <input type="text" id="syncCheckpointName" placeholder="Checkpoint name..." style="min-width:180px;">
+          <input type="text" id="syncCheckpointNote" placeholder="Short note..." style="min-width:220px;">
+          <button class="btn btn-gold btn-sm" onclick="saveSyncCheckpoint()" style="white-space:nowrap;">Save Point</button>
+        </div>
+        <div id="syncCheckpointList" style="display:grid;gap:8px;max-height:220px;overflow:auto;background:rgba(0,0,0,0.18);border:1px solid var(--border);border-radius:6px;padding:10px;"></div>
+      </div>
+      <div style="margin-top:14px;border-top:1px solid var(--border);padding-top:12px;">
         <div style="font-family:'Cinzel',serif;color:var(--gold);font-size:12px;letter-spacing:1px;text-transform:uppercase;margin-bottom:8px;">Warden Action Queue</div>
         <div id="syncActionQueue" style="display:grid;gap:8px;background:rgba(0,0,0,0.18);border:1px solid var(--border);border-radius:6px;padding:10px;"></div>
       </div>
@@ -784,8 +797,19 @@ hr.divider { border: none; border-top: 1px solid var(--border); margin: 24px 0; 
         <div id="syncTimeline" style="display:grid;gap:8px;max-height:340px;overflow:auto;background:rgba(0,0,0,0.18);border:1px solid var(--border);border-radius:6px;padding:10px;"></div>
       </div>
       <div style="margin-top:14px;border-top:1px solid var(--border);padding-top:12px;">
-        <div style="font-family:'Cinzel',serif;color:var(--gold);font-size:12px;letter-spacing:1px;text-transform:uppercase;margin-bottom:8px;">Table Chat</div>
-        <div id="syncChatLog" style="display:grid;gap:8px;max-height:220px;overflow:auto;background:rgba(0,0,0,0.18);border:1px solid var(--border);border-radius:6px;padding:10px;"></div>
+        <div style="display:flex;justify-content:space-between;gap:10px;align-items:center;">
+          <div style="font-family:'Cinzel',serif;color:var(--gold);font-size:12px;letter-spacing:1px;text-transform:uppercase;">Table Chat</div>
+          <button class="btn btn-gold btn-sm" onclick="toggleSyncChat(true)" style="white-space:nowrap;">
+            Open Chat <span id="syncChatBadge" style="display:none;margin-left:6px;background:var(--red);color:white;border-radius:999px;padding:1px 6px;font-size:10px;"></span>
+          </button>
+        </div>
+      </div>
+      <div id="syncChatPopup" style="display:none;position:fixed;right:22px;bottom:22px;width:min(420px,calc(100vw - 28px));z-index:2200;background:var(--panel);border:1px solid var(--gold-dim);box-shadow:0 18px 60px rgba(0,0,0,0.45);border-radius:8px;padding:12px;">
+        <div style="display:flex;justify-content:space-between;gap:10px;align-items:center;margin-bottom:8px;">
+          <div style="font-family:'Cinzel',serif;color:var(--gold);font-size:13px;letter-spacing:1px;text-transform:uppercase;">Table Chat</div>
+          <button class="btn btn-ghost btn-sm" onclick="toggleSyncChat(false)">Close</button>
+        </div>
+        <div id="syncChatLog" style="display:grid;gap:8px;height:280px;max-height:42vh;overflow:auto;background:rgba(0,0,0,0.18);border:1px solid var(--border);border-radius:6px;padding:10px;"></div>
         <div class="flex gap-8" style="margin-top:8px;">
           <input type="text" id="syncChatInput" placeholder="Message the table..." onkeydown="if(event.key==='Enter') sendSyncChat()">
           <button class="btn btn-gold btn-sm" onclick="sendSyncChat()" style="white-space:nowrap;">Send</button>
@@ -1217,6 +1241,10 @@ window.onload = () => {
   window.addEventListener('storage', onSharedStateChange);
 };
 
+let syncChatOpen = false;
+let syncChatUnread = 0;
+let syncLastChatId = 0;
+
 function initRemoteSync() {
   if (!window.VGSync) return;
   const cfg = VGSync.getConfig();
@@ -1238,12 +1266,14 @@ function initRemoteSync() {
     onLobby: renderSyncLobby,
     onChat: renderSyncChat,
     onEvents: renderSyncEvents,
+    onCheckpoints: renderSyncCheckpoints,
     onError: err => updateSyncStatus({ ...VGSync.status(), error: err.message }),
   });
   updateSyncStatus(VGSync.status());
   renderSyncLobby(cfg.table);
   renderSyncChat(cfg.messages || []);
   renderSyncEvents(cfg.events || []);
+  renderSyncCheckpoints(cfg.checkpoints || []);
 }
 
 function updateSyncStatus(status = (window.VGSync ? VGSync.status() : null)) {
@@ -1258,6 +1288,7 @@ function updateSyncStatus(status = (window.VGSync ? VGSync.status() : null)) {
     : state;
   renderSyncLobby(status.table);
   updateLiveSummary(status);
+  renderAdminResumeSummary(status);
 }
 
 function renderSyncLobby(table = (window.VGSync ? VGSync.status().table : null)) {
@@ -1280,9 +1311,108 @@ function renderSyncLobby(table = (window.VGSync ? VGSync.status().table : null))
   `).join('');
 }
 
+function renderAdminResumeSummary(status = (window.VGSync ? VGSync.status() : null)) {
+  const el = document.getElementById('syncResumeSummary');
+  if (!el) return;
+  const localSummary = checkpointSummaryText({ summary: snapshotResumeSummary(), rev: status?.lastRev || 0 }, 'Current');
+  const latest = (status?.checkpoints || [])[0];
+  el.innerHTML = latest
+    ? `${escHtml(localSummary)}<br><span style="color:var(--text-muted);">Latest saved: ${escHtml(checkpointSummaryText(latest))}</span>`
+    : escHtml(localSummary);
+}
+
+function snapshotResumeSummary() {
+  let session = null;
+  let maps = [];
+  try { session = JSON.parse(localStorage.getItem('vg_session') || 'null'); } catch (err) { session = null; }
+  try { maps = JSON.parse(localStorage.getItem('vg_maps') || '[]'); } catch (err) { maps = []; }
+  const activeMapId = localStorage.getItem('vg_active_map_id') || '';
+  const activeMap = Array.isArray(maps) ? (maps.find(map => map.id === activeMapId) || maps[0] || null) : null;
+  return {
+    sceneId: session?.currentSceneId || null,
+    mapName: activeMap?.name || null,
+    partyPos: activeMap?.partyPos || null,
+  };
+}
+
+function checkpointSummaryText(checkpoint, label = '') {
+  const summary = checkpoint?.summary || {};
+  const bits = [];
+  if (label) bits.push(label);
+  if (checkpoint?.name) bits.push(checkpoint.name);
+  if (summary.sceneId) bits.push(`scene ${summary.sceneId}`);
+  if (summary.mapName) bits.push(summary.partyPos ? `${summary.mapName} ${summary.partyPos.x},${summary.partyPos.y}` : summary.mapName);
+  if (checkpoint?.rev) bits.push(`rev ${checkpoint.rev}`);
+  if (!bits.length) bits.push('No scene or map loaded');
+  return bits.join(' · ');
+}
+
+function renderSyncCheckpoints(checkpoints = (window.VGSync ? VGSync.status().checkpoints : [])) {
+  const list = document.getElementById('syncCheckpointList');
+  renderAdminResumeSummary(window.VGSync ? VGSync.status() : null);
+  if (!list) return;
+  if (!window.VGSync || !VGSync.status().enabled) {
+    list.innerHTML = `<div style="font-size:12px;color:var(--text-muted);font-style:italic;">Join or create a remote table to use checkpoints.</div>`;
+    return;
+  }
+  if (!checkpoints?.length) {
+    list.innerHTML = `<div style="font-size:12px;color:var(--text-muted);font-style:italic;">No saved checkpoints yet.</div>`;
+    return;
+  }
+  list.innerHTML = checkpoints.map(checkpoint => {
+    const time = checkpoint.createdAt ? new Date(checkpoint.createdAt).toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }) : '';
+    return `
+      <div style="border-bottom:1px solid rgba(255,255,255,0.04);padding-bottom:8px;">
+        <div style="display:flex;justify-content:space-between;gap:10px;font-size:12px;color:var(--text-muted);">
+          <span><strong style="color:var(--text);">${escHtml(checkpoint.name || 'Checkpoint')}</strong> · ${escHtml(checkpoint.reason || 'manual')}</span>
+          <span>${escHtml(time)}</span>
+        </div>
+        <div style="font-size:13px;line-height:1.5;color:var(--text-dim);margin-top:3px;">${escHtml(checkpointSummaryText(checkpoint))}</div>
+        ${checkpoint.note ? `<div style="font-size:12px;color:var(--text-muted);margin-top:3px;">${escHtml(checkpoint.note)}</div>` : ''}
+        <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px;">
+          <button class="btn btn-gold btn-sm" onclick="restoreSyncCheckpoint(${checkpoint.id})">Restore</button>
+          <button class="btn btn-ghost btn-sm" onclick="deleteSyncCheckpoint(${checkpoint.id})">Delete</button>
+        </div>
+      </div>
+    `;
+  }).join('');
+}
+
+function updateSyncChatBadge() {
+  const badge = document.getElementById('syncChatBadge');
+  if (!badge) return;
+  if (syncChatUnread > 0) {
+    badge.style.display = 'inline-block';
+    badge.textContent = String(syncChatUnread);
+  } else {
+    badge.style.display = 'none';
+    badge.textContent = '';
+  }
+}
+
+function toggleSyncChat(open = !syncChatOpen) {
+  syncChatOpen = !!open;
+  const popup = document.getElementById('syncChatPopup');
+  if (popup) popup.style.display = syncChatOpen ? 'block' : 'none';
+  if (syncChatOpen) {
+    syncChatUnread = 0;
+    const log = document.getElementById('syncChatLog');
+    if (log) log.scrollTop = log.scrollHeight;
+    setTimeout(() => document.getElementById('syncChatInput')?.focus(), 50);
+  }
+  updateSyncChatBadge();
+}
+
 function renderSyncChat(messages = (window.VGSync ? VGSync.status().messages : [])) {
   const el = document.getElementById('syncChatLog');
   if (!el) return;
+  const status = window.VGSync ? VGSync.status() : null;
+  const newest = Math.max(0, ...(messages || []).map(message => message.id || 0));
+  if (!syncChatOpen && syncLastChatId && newest > syncLastChatId) {
+    syncChatUnread += (messages || []).filter(message => (message.id || 0) > syncLastChatId && message.clientId !== status?.clientId).length;
+  }
+  syncLastChatId = Math.max(syncLastChatId, newest);
+  updateSyncChatBadge();
   if (!messages?.length) {
     el.innerHTML = `<div style="font-size:12px;color:var(--text-muted);font-style:italic;">No table messages yet.</div>`;
     return;
@@ -1309,6 +1439,9 @@ function eventLabel(event) {
     'player.ready': 'Ready',
     'chat.message': 'Chat',
     'snapshot.updated': 'Sync',
+    'checkpoint.created': 'Checkpoint',
+    'checkpoint.restored': 'Restore',
+    'checkpoint.deleted': 'Checkpoint',
     'dice.roll': 'Roll',
     'scene.change': 'Scene',
     'safety.signal': 'Safety',
@@ -1346,6 +1479,9 @@ function timelineCategory(event) {
     'player.ready': 'table',
     'chat.message': 'chat',
     'snapshot.updated': 'sync',
+    'checkpoint.created': 'sync',
+    'checkpoint.restored': 'sync',
+    'checkpoint.deleted': 'sync',
     'dice.roll': 'roll',
     'scene.change': 'scene',
     'safety.signal': 'safety',
@@ -1518,6 +1654,7 @@ async function createRemoteTable() {
     document.getElementById('syncTableCode').value = result.table.code;
     await VGSync.fetchMessages(true);
     await VGSync.fetchEvents(true);
+    await VGSync.fetchCheckpoints();
     toast(`Remote table created: ${result.table.code}`, 'success');
     updateSyncStatus(VGSync.status());
   } catch (err) {
@@ -1538,6 +1675,7 @@ async function joinRemoteTable() {
     renderSession();
     await VGSync.fetchMessages(true);
     await VGSync.fetchEvents(true);
+    await VGSync.fetchCheckpoints();
     toast(`Joined remote table: ${result.table.code}`, 'success');
     updateSyncStatus(VGSync.status());
   } catch (err) {
@@ -1552,6 +1690,7 @@ async function refreshLobby() {
     const table = await VGSync.fetchLobby();
     await VGSync.fetchMessages(true);
     await VGSync.fetchEvents(true);
+    await VGSync.fetchCheckpoints();
     renderSyncLobby(table);
     updateSyncStatus(VGSync.status());
   } catch (err) {
@@ -1587,6 +1726,58 @@ async function setTimelineBookmark(eventId, bookmark) {
   }
 }
 
+async function refreshSyncCheckpoints() {
+  if (!window.VGSync) return;
+  try {
+    await VGSync.fetchCheckpoints();
+    renderSyncCheckpoints(VGSync.status().checkpoints);
+  } catch (err) {
+    toast(`Checkpoint refresh failed: ${err.message}`, 'error');
+  }
+}
+
+async function saveSyncCheckpoint(reason = 'manual') {
+  if (!window.VGSync) return;
+  const nameInput = document.getElementById('syncCheckpointName');
+  const noteInput = document.getElementById('syncCheckpointNote');
+  try {
+    await VGSync.createCheckpoint(nameInput?.value || '', noteInput?.value || '', { reason });
+    if (nameInput) nameInput.value = '';
+    if (noteInput) noteInput.value = '';
+    renderSyncCheckpoints(VGSync.status().checkpoints);
+    toast('Checkpoint saved.', 'success');
+  } catch (err) {
+    toast(`Checkpoint failed: ${err.message}`, 'error');
+  }
+}
+
+async function restoreSyncCheckpoint(checkpointId) {
+  if (!window.VGSync) return;
+  if (!confirm('Restore this checkpoint for the whole table? Current shared state will be replaced.')) return;
+  try {
+    await VGSync.restoreCheckpoint(checkpointId);
+    VGEngine.resumeSession();
+    renderCampaigns();
+    renderSession();
+    renderSyncCheckpoints(VGSync.status().checkpoints);
+    toast('Checkpoint restored.', 'success');
+  } catch (err) {
+    toast(`Restore failed: ${err.message}`, 'error');
+  }
+}
+
+async function deleteSyncCheckpoint(checkpointId) {
+  if (!window.VGSync) return;
+  if (!confirm('Delete this checkpoint?')) return;
+  try {
+    await VGSync.deleteCheckpoint(checkpointId);
+    renderSyncCheckpoints(VGSync.status().checkpoints);
+    toast('Checkpoint deleted.', 'warn');
+  } catch (err) {
+    toast(`Delete failed: ${err.message}`, 'error');
+  }
+}
+
 function downloadText(filename, text, type = 'text/plain') {
   const blob = new Blob([text], { type });
   const url = URL.createObjectURL(blob);
@@ -1599,8 +1790,12 @@ function downloadText(filename, text, type = 'text/plain') {
   setTimeout(() => URL.revokeObjectURL(url), 500);
 }
 
-function exportTimeline(format = 'markdown') {
+async function exportTimeline(format = 'markdown') {
   const status = window.VGSync ? VGSync.status() : null;
+  if (window.VGSync && status?.enabled && status?.canWriteSharedState) {
+    await VGSync.createCheckpoint(`Recap export - ${new Date().toLocaleString()}`, 'Saved automatically before exporting the session recap.', { reason: 'recap-export' }).catch(() => null);
+    renderSyncCheckpoints(VGSync.status().checkpoints);
+  }
   const events = status?.events || [];
   const mode = document.getElementById('timelinePrivacy')?.value || 'player';
   const filtered = timelineEventsForMode(events, mode);
@@ -1698,6 +1893,7 @@ function mountLiveTablePanel() {
   renderSyncEvents(window.VGSync ? VGSync.status().events : []);
   renderSyncLobby(window.VGSync ? VGSync.status().table : null);
   renderSyncChat(window.VGSync ? VGSync.status().messages : []);
+  renderSyncCheckpoints(window.VGSync ? VGSync.status().checkpoints : []);
 }
 
 function updateLiveSummary(status = (window.VGSync ? VGSync.status() : null)) {

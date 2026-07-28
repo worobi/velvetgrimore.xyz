@@ -30,6 +30,7 @@ const VGSync = (() => {
   let messages = [];
   let lastEventId = 0;
   let events = [];
+  let checkpoints = [];
   let liveStream = null;
   let liveState = 'off';
 
@@ -178,6 +179,10 @@ const VGSync = (() => {
       mergeEvents(payload.events.events || [], payload.events.lastEventId || 0);
       callbacks.onEvents?.(events);
     }
+    if (payload.checkpoints) {
+      checkpoints = payload.checkpoints.checkpoints || payload.checkpoints || [];
+      callbacks.onCheckpoints?.(checkpoints);
+    }
     callbacks.onLive?.({ state: liveState, reason: payload.reason || 'sync', sentAt: payload.sentAt || null });
     callbacks.onStatus?.(status());
   }
@@ -247,6 +252,7 @@ const VGSync = (() => {
     lastMessageId = 0;
     events = [];
     lastEventId = 0;
+    checkpoints = [];
     const next = saveConfig({ ...config, enabled: true, code: table.code, lastRev: table.rev, role: 'warden', ready: true });
     lastFingerprint = fingerprint(local);
     start(callbacks);
@@ -271,6 +277,7 @@ const VGSync = (() => {
     lastMessageId = 0;
     events = [];
     lastEventId = 0;
+    checkpoints = [];
     const next = saveConfig({
       ...config,
       enabled: true,
@@ -394,6 +401,7 @@ const VGSync = (() => {
     });
     const incoming = payload.events || [];
     mergeEvents(incoming, payload.lastEventId || 0);
+    if (canWriteSharedState()) await fetchCheckpoints().catch(() => checkpoints);
     callbacks.onEvents?.(events);
     callbacks.onStatus?.(status());
     return payload.event;
@@ -416,6 +424,73 @@ const VGSync = (() => {
     callbacks.onEvents?.(events);
     callbacks.onStatus?.(status());
     return payload.event;
+  }
+
+  async function fetchCheckpoints() {
+    const config = getConfig();
+    if (!config.enabled || !config.code) return [];
+    const payload = await request(`/api/tables/${config.code}/checkpoints`);
+    checkpoints = payload.checkpoints || [];
+    callbacks.onCheckpoints?.(checkpoints);
+    callbacks.onStatus?.(status());
+    return checkpoints;
+  }
+
+  async function createCheckpoint(name = '', note = '', options = {}) {
+    const config = getConfig();
+    if (!config.enabled || !config.code) throw new Error('Join or create a table first.');
+    if (!canWriteSharedState()) throw new Error('Only the Warden can save checkpoints.');
+    const payload = await request(`/api/tables/${config.code}/checkpoints`, {
+      method: 'POST',
+      body: JSON.stringify({
+        name,
+        note,
+        reason: options.reason || 'manual',
+        player: playerPayload(),
+      }),
+    });
+    checkpoints = payload.checkpoints || [];
+    callbacks.onCheckpoints?.(checkpoints);
+    callbacks.onStatus?.(status());
+    return payload.checkpoint;
+  }
+
+  async function restoreCheckpoint(checkpointId) {
+    const config = getConfig();
+    if (!config.enabled || !config.code) throw new Error('Join or create a table first.');
+    if (!canWriteSharedState()) throw new Error('Only the Warden can restore checkpoints.');
+    const payload = await request(`/api/tables/${config.code}/checkpoints/${encodeURIComponent(checkpointId)}`, {
+      method: 'PATCH',
+      body: JSON.stringify({
+        action: 'restore',
+        player: playerPayload(),
+      }),
+    });
+    checkpoints = payload.checkpoints || [];
+    if (payload.table) {
+      lastTable = payload.table;
+      applySnapshot(payload.table.snapshot);
+      saveConfig({ ...config, lastRev: payload.table.rev || config.lastRev || 0 });
+      lastFingerprint = fingerprint(payload.table.snapshot);
+      callbacks.onLobby?.(payload.table);
+    }
+    callbacks.onCheckpoints?.(checkpoints);
+    callbacks.onStatus?.(status());
+    return payload.table || null;
+  }
+
+  async function deleteCheckpoint(checkpointId) {
+    const config = getConfig();
+    if (!config.enabled || !config.code) throw new Error('Join or create a table first.');
+    if (!canWriteSharedState()) throw new Error('Only the Warden can delete checkpoints.');
+    const payload = await request(`/api/tables/${config.code}/checkpoints/${encodeURIComponent(checkpointId)}`, {
+      method: 'DELETE',
+      body: JSON.stringify({ player: playerPayload() }),
+    });
+    checkpoints = payload.checkpoints || [];
+    callbacks.onCheckpoints?.(checkpoints);
+    callbacks.onStatus?.(status());
+    return checkpoints;
   }
 
   async function updatePlayer(updates = {}) {
@@ -482,6 +557,7 @@ const VGSync = (() => {
     lastTable = table;
     saveConfig({ ...config, lastRev: table.rev });
     lastFingerprint = current;
+    await fetchCheckpoints().catch(() => checkpoints);
     callbacks.onStatus?.(status());
     return table;
   }
@@ -496,6 +572,7 @@ const VGSync = (() => {
       if (!liveActive) {
         await fetchMessages();
         await fetchEvents();
+        if (!checkpoints.length && canWriteSharedState()) await fetchCheckpoints();
       }
       await push();
     } catch (err) {
@@ -547,6 +624,7 @@ const VGSync = (() => {
       lastMessageId,
       events,
       lastEventId,
+      checkpoints,
       table: lastTable,
       players: lastTable?.players || [],
     };
@@ -572,6 +650,10 @@ const VGSync = (() => {
     recordEvent,
     reviewEvent,
     updateEventMeta,
+    fetchCheckpoints,
+    createCheckpoint,
+    restoreCheckpoint,
+    deleteCheckpoint,
     updatePlayer,
     setReady,
     pull,

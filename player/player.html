@@ -371,6 +371,10 @@ textarea.npc-response:focus { border-color: var(--border-hot); }
         <div class="summary-label">My Requests</div>
         <div class="summary-value" id="playerLiveRequests">None</div>
       </div>
+      <div class="summary-card">
+        <div class="summary-label">Resume</div>
+        <div class="summary-value" id="playerLiveResume">No scene</div>
+      </div>
     </div>
     <div id="playerSyncLobby" style="display:grid;gap:8px;margin-bottom:12px;"></div>
     <div style="font-family:'Cinzel',serif;color:var(--gold);font-size:12px;letter-spacing:1px;text-transform:uppercase;margin-bottom:8px;">Table Requests</div>
@@ -389,10 +393,22 @@ textarea.npc-response:focus { border-color: var(--border-hot); }
     <div id="playerRequestTracker" style="display:grid;gap:8px;max-height:180px;overflow:auto;background:rgba(0,0,0,0.18);border:1px solid var(--border);border-radius:6px;padding:10px;margin-bottom:12px;"></div>
     <div style="font-family:'Cinzel',serif;color:var(--gold);font-size:12px;letter-spacing:1px;text-transform:uppercase;margin-bottom:8px;">Activity Feed</div>
     <div id="playerEventRail" style="display:grid;gap:8px;max-height:220px;overflow:auto;background:rgba(0,0,0,0.18);border:1px solid var(--border);border-radius:6px;padding:10px;margin-bottom:12px;"></div>
-    <div id="playerChatLog" style="display:grid;gap:8px;max-height:220px;overflow:auto;background:rgba(0,0,0,0.18);border:1px solid var(--border);border-radius:6px;padding:10px;"></div>
-    <div class="remote-join-row" style="margin-top:10px;">
+    <div style="display:flex;justify-content:space-between;gap:10px;align-items:center;margin-bottom:10px;">
+      <div style="font-family:'Cinzel',serif;color:var(--gold);font-size:12px;letter-spacing:1px;text-transform:uppercase;">Table Chat</div>
+      <button class="btn btn-purple" onclick="togglePlayerChat(true)" style="white-space:nowrap;">
+        Open Chat <span id="playerChatBadge" style="display:none;margin-left:6px;background:#b85f76;color:white;border-radius:999px;padding:1px 6px;font-size:10px;"></span>
+      </button>
+    </div>
+    <div id="playerChatPopup" style="display:none;position:fixed;right:18px;bottom:78px;width:min(420px,calc(100vw - 28px));z-index:2200;background:var(--surface2);border:1px solid var(--gold);box-shadow:0 18px 60px rgba(0,0,0,0.45);border-radius:8px;padding:12px;">
+      <div style="display:flex;justify-content:space-between;gap:10px;align-items:center;margin-bottom:8px;">
+        <div style="font-family:'Cinzel',serif;color:var(--gold);font-size:13px;letter-spacing:1px;text-transform:uppercase;">Table Chat</div>
+        <button class="btn btn-ghost" style="padding:6px 10px;font-size:10px;" onclick="togglePlayerChat(false)">Close</button>
+      </div>
+      <div id="playerChatLog" style="display:grid;gap:8px;height:280px;max-height:42vh;overflow:auto;background:rgba(0,0,0,0.18);border:1px solid var(--border);border-radius:6px;padding:10px;"></div>
+      <div class="remote-join-row" style="margin-top:10px;">
       <input type="text" id="playerChatInput" placeholder="Message the table..." onkeydown="if(event.key==='Enter') playerSendChat()">
       <button class="btn btn-purple" onclick="playerSendChat()">Send</button>
+      </div>
     </div>
   </div>
 </div>
@@ -633,6 +649,10 @@ function render(session) {
   `;
 }
 
+let playerChatOpen = false;
+let playerChatUnread = 0;
+let playerLastChatId = 0;
+
 function initRemoteSync() {
   if (!window.VGSync) return;
   VGSync.start({
@@ -644,11 +664,13 @@ function initRemoteSync() {
     onLobby: renderPlayerLobby,
     onChat: renderPlayerChat,
     onEvents: renderPlayerEvents,
+    onCheckpoints: () => renderPlayerLiveSummary(VGSync.status()),
     onError: err => updatePlayerSyncStatus({ ...VGSync.status(), error: err.message }),
   });
   updatePlayerSyncStatus(VGSync.status());
   renderPlayerChat(VGSync.status().messages || []);
   renderPlayerEvents(VGSync.status().events || []);
+  if (VGSync.status().enabled) VGSync.fetchCheckpoints().catch(() => null);
 }
 
 function updatePlayerSyncStatus(status = (window.VGSync ? VGSync.status() : null)) {
@@ -691,11 +713,13 @@ function renderPlayerLiveSummary(status = (window.VGSync ? VGSync.status() : nul
   const connection = document.getElementById('playerLiveConnection');
   const table = document.getElementById('playerLiveTable');
   const requests = document.getElementById('playerLiveRequests');
-  if (!connection || !table || !requests) return;
+  const resume = document.getElementById('playerLiveResume');
+  if (!connection || !table || !requests || !resume) return;
   if (!status || !status.enabled || !status.code) {
     connection.textContent = 'Offline';
     table.textContent = 'No table';
     requests.textContent = 'None';
+    resume.textContent = 'No scene';
     return;
   }
   const players = status.players || status.table?.players || [];
@@ -704,6 +728,7 @@ function renderPlayerLiveSummary(status = (window.VGSync ? VGSync.status() : nul
   connection.textContent = status.liveConnected ? 'Live' : (status.liveState === 'reconnecting' ? 'Reconnecting' : 'Polling');
   table.textContent = `${status.code} · ${online}/${players.length || 0} online · ${ready} ready`;
   requests.textContent = latestRequestStatus(status.events || []);
+  resume.textContent = playerResumeText(status);
 }
 
 function renderPlayerLobby(table = (window.VGSync ? VGSync.status().table : null)) {
@@ -722,9 +747,66 @@ function renderPlayerLobby(table = (window.VGSync ? VGSync.status().table : null
   `).join('');
 }
 
+function playerSnapshotSummary() {
+  let session = null;
+  let maps = [];
+  try { session = JSON.parse(localStorage.getItem('vg_session') || 'null'); } catch (err) { session = null; }
+  try { maps = JSON.parse(localStorage.getItem('vg_maps') || '[]'); } catch (err) { maps = []; }
+  const activeMapId = localStorage.getItem('vg_active_map_id') || '';
+  const activeMap = Array.isArray(maps) ? (maps.find(map => map.id === activeMapId) || maps[0] || null) : null;
+  return {
+    sceneId: session?.currentSceneId || null,
+    mapName: activeMap?.name || null,
+    partyPos: activeMap?.partyPos || null,
+  };
+}
+
+function playerResumeText(status = (window.VGSync ? VGSync.status() : null)) {
+  const summary = playerSnapshotSummary();
+  const latest = (status?.checkpoints || [])[0]?.summary || null;
+  const source = summary.sceneId || summary.mapName ? summary : latest;
+  if (!source) return 'No scene';
+  const parts = [];
+  if (source.sceneId) parts.push(`Scene ${source.sceneId}`);
+  if (source.mapName) parts.push(source.partyPos ? `${source.mapName} ${source.partyPos.x},${source.partyPos.y}` : source.mapName);
+  return parts.join(' · ') || 'Ready';
+}
+
+function updatePlayerChatBadge() {
+  const badge = document.getElementById('playerChatBadge');
+  if (!badge) return;
+  if (playerChatUnread > 0) {
+    badge.style.display = 'inline-block';
+    badge.textContent = String(playerChatUnread);
+  } else {
+    badge.style.display = 'none';
+    badge.textContent = '';
+  }
+}
+
+function togglePlayerChat(open = !playerChatOpen) {
+  playerChatOpen = !!open;
+  const popup = document.getElementById('playerChatPopup');
+  if (popup) popup.style.display = playerChatOpen ? 'block' : 'none';
+  if (playerChatOpen) {
+    playerChatUnread = 0;
+    const log = document.getElementById('playerChatLog');
+    if (log) log.scrollTop = log.scrollHeight;
+    setTimeout(() => document.getElementById('playerChatInput')?.focus(), 50);
+  }
+  updatePlayerChatBadge();
+}
+
 function renderPlayerChat(messages = (window.VGSync ? VGSync.status().messages : [])) {
   const el = document.getElementById('playerChatLog');
   if (!el) return;
+  const status = window.VGSync ? VGSync.status() : null;
+  const newest = Math.max(0, ...(messages || []).map(message => message.id || 0));
+  if (!playerChatOpen && playerLastChatId && newest > playerLastChatId) {
+    playerChatUnread += (messages || []).filter(message => (message.id || 0) > playerLastChatId && message.clientId !== status?.clientId).length;
+  }
+  playerLastChatId = Math.max(playerLastChatId, newest);
+  updatePlayerChatBadge();
   if (!messages?.length) {
     el.innerHTML = `<div style="font-size:12px;color:var(--text-muted);font-style:italic;">Join a remote table to chat.</div>`;
     return;
@@ -751,6 +833,9 @@ function playerEventLabel(event) {
     'player.ready': 'Ready',
     'chat.message': 'Chat',
     'snapshot.updated': 'Sync',
+    'checkpoint.created': 'Checkpoint',
+    'checkpoint.restored': 'Restore',
+    'checkpoint.deleted': 'Checkpoint',
     'dice.roll': 'Roll',
     'scene.change': 'Scene',
     'safety.signal': 'Safety',
@@ -836,6 +921,7 @@ async function joinRemoteTableFromPlayer() {
     renderPlayerLobby(table.table);
     await VGSync.fetchMessages(true);
     await VGSync.fetchEvents(true);
+    await VGSync.fetchCheckpoints();
     VGEngine.resumeSession();
     refreshView();
   } catch (err) {
@@ -850,6 +936,7 @@ async function playerRefreshLobby() {
     const table = await VGSync.fetchLobby();
     await VGSync.fetchMessages(true);
     await VGSync.fetchEvents(true);
+    await VGSync.fetchCheckpoints();
     renderPlayerLobby(table);
     updatePlayerSyncStatus(VGSync.status());
   } catch (err) {

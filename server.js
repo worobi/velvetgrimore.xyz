@@ -14,6 +14,7 @@ const PLAYER_ROLES = new Set(['warden', 'protagonist', 'boss', 'spectator']);
 const PRESENCE_ONLINE_MS = 20_000;
 const MAX_MESSAGES = 200;
 const MAX_EVENTS = 500;
+const MAX_CHECKPOINTS = 30;
 const LIVE_KEEPALIVE_MS = 15_000;
 const EVENT_TYPES = new Set([
   'table.created',
@@ -21,6 +22,9 @@ const EVENT_TYPES = new Set([
   'player.ready',
   'chat.message',
   'snapshot.updated',
+  'checkpoint.created',
+  'checkpoint.restored',
+  'checkpoint.deleted',
   'dice.roll',
   'scene.change',
   'safety.signal',
@@ -40,6 +44,9 @@ const EVENT_CATEGORIES = {
   'player.ready': 'table',
   'chat.message': 'chat',
   'snapshot.updated': 'sync',
+  'checkpoint.created': 'sync',
+  'checkpoint.restored': 'sync',
+  'checkpoint.deleted': 'sync',
   'dice.roll': 'roll',
   'scene.change': 'scene',
   'safety.signal': 'safety',
@@ -131,6 +138,7 @@ function normalizeTable(table) {
   if (!table.players || typeof table.players !== 'object' || Array.isArray(table.players)) table.players = {};
   if (!Array.isArray(table.messages)) table.messages = [];
   if (!Array.isArray(table.events)) table.events = [];
+  if (!Array.isArray(table.checkpoints)) table.checkpoints = [];
   table.createdAt = table.createdAt || now;
   table.updatedAt = table.updatedAt || table.createdAt;
   table.status = table.status || 'lobby';
@@ -138,6 +146,7 @@ function normalizeTable(table) {
   table.rev = Number(table.rev || 1);
   table.msgSeq = Number(table.msgSeq || 0);
   table.evtSeq = Number(table.evtSeq || 0);
+  table.checkpointSeq = Number(table.checkpointSeq || 0);
   Object.keys(table.players).forEach(id => {
     const normalized = cleanPlayer({ id, ...table.players[id] }, table.players[id]?.role || 'protagonist', { touch: false });
     if (normalized) table.players[id] = normalized;
@@ -172,6 +181,19 @@ function normalizeTable(table) {
     applyResult: event.applyResult && typeof event.applyResult === 'object' && !Array.isArray(event.applyResult) ? event.applyResult : null,
   })).slice(-MAX_EVENTS);
   table.evtSeq = Math.max(table.evtSeq, ...table.events.map(event => event.id), 0);
+  table.checkpoints = table.checkpoints.map((checkpoint, index) => ({
+    id: Number(checkpoint.id || index + 1),
+    name: String(checkpoint.name || `Checkpoint ${index + 1}`).slice(0, 120),
+    note: String(checkpoint.note || '').slice(0, 1000),
+    reason: String(checkpoint.reason || 'manual').slice(0, 80),
+    snapshot: checkpoint.snapshot && typeof checkpoint.snapshot === 'object' && !Array.isArray(checkpoint.snapshot) ? checkpoint.snapshot : {},
+    rev: Number(checkpoint.rev || table.rev || 1),
+    eventId: Number(checkpoint.eventId || table.evtSeq || 0),
+    createdAt: checkpoint.createdAt || now,
+    createdBy: checkpoint.createdBy || null,
+    createdByName: checkpoint.createdByName || null,
+  })).slice(-MAX_CHECKPOINTS);
+  table.checkpointSeq = Math.max(table.checkpointSeq, ...table.checkpoints.map(checkpoint => checkpoint.id), 0);
   return table;
 }
 
@@ -314,6 +336,96 @@ function eventsPayload(table, since = 0, includePending = false) {
   };
 }
 
+function cloneJSON(value) {
+  try {
+    return JSON.parse(JSON.stringify(value || {}));
+  } catch (err) {
+    return {};
+  }
+}
+
+function readSnapshotValue(snapshot, key, fallback) {
+  const raw = snapshot?.keys?.[key];
+  if (!raw) return fallback;
+  try { return JSON.parse(raw); }
+  catch (err) { return fallback; }
+}
+
+function checkpointSummary(snapshot = {}) {
+  const session = readSnapshotValue(snapshot, 'vg_session', null);
+  const maps = readSnapshotValue(snapshot, 'vg_maps', []);
+  const activeMapId = snapshot?.keys?.vg_active_map_id || null;
+  const activeMap = Array.isArray(maps)
+    ? (maps.find(map => map.id === activeMapId) || maps[0] || null)
+    : null;
+  return {
+    sceneId: session?.currentSceneId || null,
+    mapName: activeMap?.name || null,
+    partyPos: activeMap?.partyPos || null,
+    capturedAt: snapshot?.capturedAt || null,
+  };
+}
+
+function cleanCheckpointInput(input = {}) {
+  return {
+    name: String(input.name || '').trim().slice(0, 120),
+    note: String(input.note || '').trim().slice(0, 1000),
+  };
+}
+
+function checkpointPayload(table) {
+  normalizeTable(table);
+  return {
+    code: table.code,
+    lastCheckpointId: table.checkpointSeq || 0,
+    checkpoints: table.checkpoints.slice().reverse().map(checkpoint => ({
+      ...checkpoint,
+      summary: checkpointSummary(checkpoint.snapshot),
+    })),
+  };
+}
+
+function addCheckpoint(table, input = {}, player = null, reason = 'manual') {
+  normalizeTable(table);
+  const cleaned = cleanCheckpointInput(input);
+  const now = new Date().toISOString();
+  const summary = checkpointSummary(table.snapshot || {});
+  const suffix = summary.mapName
+    ? `${summary.mapName}${summary.partyPos ? ` ${summary.partyPos.x},${summary.partyPos.y}` : ''}`
+    : (summary.sceneId || 'Current table state');
+  table.checkpointSeq = Number(table.checkpointSeq || 0) + 1;
+  const checkpoint = {
+    id: table.checkpointSeq,
+    name: cleaned.name || `${reason.replace(/-/g, ' ')} - ${suffix}`.slice(0, 120),
+    note: cleaned.note,
+    reason,
+    snapshot: cloneJSON(table.snapshot || {}),
+    rev: table.rev || 1,
+    eventId: table.evtSeq || 0,
+    createdAt: now,
+    createdBy: player?.id || null,
+    createdByName: player?.name || null,
+  };
+  table.checkpoints.push(checkpoint);
+  table.checkpoints = table.checkpoints.slice(-MAX_CHECKPOINTS);
+  table.updatedAt = now;
+  return checkpoint;
+}
+
+function restoreCheckpoint(table, checkpoint, player) {
+  normalizeTable(table);
+  table.snapshot = cloneJSON(checkpoint.snapshot || {});
+  table.rev = Number(table.rev || 1) + 1;
+  table.updatedAt = new Date().toISOString();
+  table.updatedBy = player?.id || null;
+  addEvent(table, {
+    type: 'checkpoint.restored',
+    text: `${player?.name || 'Warden'} restored checkpoint: ${checkpoint.name}.`,
+    detail: { checkpointId: checkpoint.id, checkpointName: checkpoint.name, rev: table.rev },
+  }, player);
+  return table;
+}
+
 function activityText(type, player, detail = {}) {
   const name = player?.name || 'Someone';
   if (type === 'table.created') return `${name} created the table.`;
@@ -321,6 +433,9 @@ function activityText(type, player, detail = {}) {
   if (type === 'player.ready') return `${name} is ${detail.ready ? 'ready' : 'not ready'}.`;
   if (type === 'chat.message') return `${name} sent a table message.`;
   if (type === 'snapshot.updated') return `${name} synced the shared table state.`;
+  if (type === 'checkpoint.created') return `${name} saved a session checkpoint.`;
+  if (type === 'checkpoint.restored') return `${name} restored a session checkpoint.`;
+  if (type === 'checkpoint.deleted') return `${name} deleted a session checkpoint.`;
   if (type === 'dice.roll') return `${name} rolled d${detail.sides || '?'}${detail.result ? `: ${detail.result}` : ''}.`;
   if (type === 'scene.change') return `${name} changed scene${detail.sceneTitle ? ` to ${detail.sceneTitle}` : ''}.`;
   if (type === 'safety.signal') return `${name} raised ${detail.tier || 'a safety signal'}.`;
@@ -495,6 +610,12 @@ function applyApprovedAction(table, event, player) {
   if (result.applied) {
     table.rev += 1;
     table.updatedBy = player.id;
+    if (event.type === 'scene.change') {
+      addCheckpoint(table, {
+        name: `Scene checkpoint - ${result.detail?.sceneTitle || result.detail?.sceneId || 'new scene'}`,
+        note: 'Saved automatically after an approved scene change.',
+      }, player, 'scene-change');
+    }
     addEvent(table, {
       type: 'action.applied',
       text: result.summary || `${player.name} applied an approved table action.`,
@@ -669,6 +790,8 @@ async function handleApi(req, res, pathname) {
       msgSeq: 0,
       events: [],
       evtSeq: 0,
+      checkpoints: [],
+      checkpointSeq: 0,
     };
     const player = upsertPlayer(table, {
       clientId: body.clientId,
@@ -677,6 +800,7 @@ async function handleApi(req, res, pathname) {
       ready: true,
     }, 'warden');
     if (player) addEvent(table, { type: 'table.created', text: activityText('table.created', player) }, player);
+    if (player) addCheckpoint(table, { name: 'Opening checkpoint', note: 'Saved when the remote table was created.' }, player, 'table-created');
     data.tables[next] = table;
     writeTables(data);
     return send(res, 201, tablePayload(table));
@@ -771,6 +895,65 @@ async function handleApi(req, res, pathname) {
       writeTables(data);
       broadcastTable(tableCode, 'message.created', table);
       return send(res, 201, { ...messagesPayload(table), message });
+    }
+  }
+
+  const checkpointMatch = pathname.match(/^\/api\/tables\/([A-Z0-9]{4,10})\/checkpoints(?:\/([0-9]+))?$/i);
+  if (checkpointMatch) {
+    const tableCode = checkpointMatch[1].toUpperCase();
+    const checkpointId = checkpointMatch[2] ? Number(checkpointMatch[2]) : null;
+    const data = readTables();
+    const table = data.tables[tableCode] && normalizeTable(data.tables[tableCode]);
+    if (!table) return send(res, 404, { error: 'Table not found' });
+
+    if (!checkpointId && req.method === 'GET') return send(res, 200, checkpointPayload(table));
+
+    const body = await readBody(req);
+    const input = body.player || body;
+    const id = String(input.clientId || input.id || body.clientId || '').trim().slice(0, 80);
+    if (!id) return send(res, 400, { error: 'Player clientId is required' });
+    const fallbackRole = table.players[id]?.role || input.role || body.role || 'protagonist';
+    const player = upsertPlayer(table, { ...input, clientId: id }, fallbackRole);
+    if (!player || player.role !== 'warden') return send(res, 403, { error: 'Only the Warden can manage session checkpoints.' });
+
+    if (!checkpointId && req.method === 'POST') {
+      const checkpoint = addCheckpoint(table, body, player, String(body.reason || 'manual').slice(0, 80) || 'manual');
+      addEvent(table, {
+        type: 'checkpoint.created',
+        text: `${player.name || 'Warden'} saved checkpoint: ${checkpoint.name}.`,
+        detail: { checkpointId: checkpoint.id, checkpointName: checkpoint.name, reason: checkpoint.reason },
+      }, player);
+      data.tables[tableCode] = table;
+      writeTables(data);
+      broadcastTable(tableCode, 'checkpoint.created', table);
+      return send(res, 201, { ...checkpointPayload(table), checkpoint: { ...checkpoint, summary: checkpointSummary(checkpoint.snapshot) } });
+    }
+
+    const checkpoint = table.checkpoints.find(item => item.id === checkpointId);
+    if (!checkpoint) return send(res, 404, { error: 'Checkpoint not found' });
+
+    if (checkpointId && req.method === 'PATCH') {
+      const action = String(body.action || '').toLowerCase();
+      if (action !== 'restore') return send(res, 400, { error: 'Checkpoint action must be restore.' });
+      restoreCheckpoint(table, checkpoint, player);
+      data.tables[tableCode] = table;
+      writeTables(data);
+      broadcastTable(tableCode, 'checkpoint.restored', table);
+      return send(res, 200, { table: tablePayload(table), ...checkpointPayload(table), checkpoint: { ...checkpoint, summary: checkpointSummary(checkpoint.snapshot) } });
+    }
+
+    if (checkpointId && req.method === 'DELETE') {
+      table.checkpoints = table.checkpoints.filter(item => item.id !== checkpointId);
+      table.updatedAt = new Date().toISOString();
+      addEvent(table, {
+        type: 'checkpoint.deleted',
+        text: `${player.name || 'Warden'} deleted checkpoint: ${checkpoint.name}.`,
+        detail: { checkpointId: checkpoint.id, checkpointName: checkpoint.name },
+      }, player);
+      data.tables[tableCode] = table;
+      writeTables(data);
+      broadcastTable(tableCode, 'checkpoint.deleted', table);
+      return send(res, 200, checkpointPayload(table));
     }
   }
 
@@ -882,6 +1065,12 @@ async function handleApi(req, res, pathname) {
       table.snapshot = body.snapshot || {};
       table.updatedAt = new Date().toISOString();
       table.updatedBy = body.clientId || null;
+      if (body.autoCheckpoint !== false) {
+        addCheckpoint(table, {
+          name: body.checkpointName || `Warden sync - rev ${table.rev}`,
+          note: 'Saved automatically during Warden sync.',
+        }, player, 'warden-sync');
+      }
       addEvent(table, { type: 'snapshot.updated', text: activityText('snapshot.updated', player), detail: { rev: table.rev } }, player);
       data.tables[tableCode] = table;
       writeTables(data);
