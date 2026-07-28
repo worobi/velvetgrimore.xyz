@@ -357,6 +357,15 @@ textarea.npc-response:focus { border-color: var(--border-hot); }
   <div id="mainContent"></div>
   <div class="remote-join" id="playerRemoteChatDock" style="margin-top:22px;">
     <div style="font-family:'Cinzel',serif;color:var(--gold);font-size:14px;letter-spacing:1px;margin-bottom:6px;">Live Table</div>
+    <div style="display:grid;gap:8px;margin-bottom:12px;background:rgba(0,0,0,0.18);border:1px solid var(--border);border-radius:6px;padding:10px;">
+      <div id="playerAccountStatus" style="font-size:13px;color:var(--text-muted);">Not logged in.</div>
+      <div class="remote-join-row">
+        <input type="text" id="playerAccountUsername" placeholder="Username">
+        <input type="password" id="playerAccountPassword" placeholder="Password" onkeydown="if(event.key==='Enter') playerAccountLogin()">
+        <button class="btn btn-purple" onclick="playerAccountLogin()">Login</button>
+        <button class="btn btn-ghost" onclick="playerAccountLogout()">Logout</button>
+      </div>
+    </div>
     <div id="playerSyncStatus" style="font-size:13px;color:var(--text-muted);margin-bottom:10px;"></div>
     <div class="summary-grid" style="margin-bottom:12px;">
       <div class="summary-card">
@@ -684,6 +693,7 @@ function initRemoteSync() {
     onCheckpoints: () => renderPlayerLiveSummary(VGSync.status()),
     onFlow: renderPlayerFlow,
     onRooms: renderPlayerRooms,
+    onAccount: renderPlayerAccount,
     onError: err => updatePlayerSyncStatus({ ...VGSync.status(), error: err.message }),
   });
   updatePlayerSyncStatus(VGSync.status());
@@ -694,6 +704,43 @@ function initRemoteSync() {
   if (VGSync.status().enabled) VGSync.fetchCheckpoints().catch(() => null);
   if (VGSync.status().enabled) VGSync.fetchFlow().catch(() => null);
   if (VGSync.status().enabled) VGSync.fetchRooms().catch(() => null);
+  initPlayerAccount();
+}
+
+async function initPlayerAccount() {
+  if (!window.VGSync) return;
+  const session = VGSync.getAccountSession();
+  if (session?.token) await VGSync.accountMe().catch(() => null);
+  renderPlayerAccount();
+}
+
+function renderPlayerAccount() {
+  const el = document.getElementById('playerAccountStatus');
+  if (!el || !window.VGSync) return;
+  const user = VGSync.getAccountSession()?.user;
+  el.textContent = user ? `Logged in as ${user.displayName || user.username} · ${user.role}` : 'Not logged in.';
+}
+
+async function playerAccountLogin() {
+  if (!window.VGSync) return;
+  const username = document.getElementById('playerAccountUsername')?.value || '';
+  const password = document.getElementById('playerAccountPassword')?.value || '';
+  try {
+    await VGSync.accountLogin(username, password);
+    renderPlayerAccount();
+    updatePlayerSyncStatus(VGSync.status());
+    showToast('Logged in.');
+  } catch (err) {
+    showToast(`Login failed: ${err.message}`);
+  }
+}
+
+async function playerAccountLogout() {
+  if (!window.VGSync) return;
+  await VGSync.accountLogout();
+  renderPlayerAccount();
+  updatePlayerSyncStatus(VGSync.status());
+  showToast('Logged out.');
 }
 
 function updatePlayerSyncStatus(status = (window.VGSync ? VGSync.status() : null)) {

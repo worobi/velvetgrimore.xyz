@@ -9,8 +9,10 @@ const crypto = require('crypto');
 const ROOT = __dirname;
 const DATA_DIR = process.env.DATA_DIR || (fs.existsSync('/data') ? '/data' : path.join(ROOT, 'server-data'));
 const TABLES_FILE = path.join(DATA_DIR, 'tables.json');
+const ACCOUNTS_FILE = path.join(DATA_DIR, 'accounts.json');
 const PORT = Number(process.env.PORT || 8765);
 const PLAYER_ROLES = new Set(['warden', 'protagonist', 'boss', 'spectator']);
+const ACCOUNT_ROLES = new Set(['owner', 'admin', 'warden', 'player', 'spectator']);
 const PRESENCE_ONLINE_MS = 20_000;
 const MAX_MESSAGES = 200;
 const MAX_EVENTS = 500;
@@ -19,6 +21,8 @@ const MAX_PROMPTS = 80;
 const MAX_HANDOUTS = 80;
 const MAX_ROOMS = 40;
 const MAX_ROOM_MESSAGES = 300;
+const MAX_AUDIT = 500;
+const SESSION_TTL_MS = 1000 * 60 * 60 * 24 * 14;
 const LIVE_KEEPALIVE_MS = 15_000;
 const EVENT_TYPES = new Set([
   'table.created',
@@ -96,6 +100,7 @@ const liveStreams = new Map();
 function ensureDataFile() {
   if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
   if (!fs.existsSync(TABLES_FILE)) fs.writeFileSync(TABLES_FILE, JSON.stringify({ tables: {} }, null, 2));
+  if (!fs.existsSync(ACCOUNTS_FILE)) fs.writeFileSync(ACCOUNTS_FILE, JSON.stringify({ users: {}, sessions: {}, audit: [], userSeq: 0 }, null, 2));
 }
 
 function readTables() {
@@ -113,6 +118,142 @@ function readTables() {
 function writeTables(data) {
   ensureDataFile();
   fs.writeFileSync(TABLES_FILE, JSON.stringify(data, null, 2));
+}
+
+function readAccounts() {
+  ensureDataFile();
+  try {
+    const data = JSON.parse(fs.readFileSync(ACCOUNTS_FILE, 'utf8'));
+    if (!data || typeof data !== 'object') return { users: {}, sessions: {}, audit: [], userSeq: 0 };
+    if (!data.users || typeof data.users !== 'object') data.users = {};
+    if (!data.sessions || typeof data.sessions !== 'object') data.sessions = {};
+    if (!Array.isArray(data.audit)) data.audit = [];
+    data.userSeq = Number(data.userSeq || 0);
+    return data;
+  } catch (err) {
+    return { users: {}, sessions: {}, audit: [], userSeq: 0 };
+  }
+}
+
+function writeAccounts(data) {
+  ensureDataFile();
+  fs.writeFileSync(ACCOUNTS_FILE, JSON.stringify(data, null, 2));
+}
+
+function cleanAccountRole(role, fallback = 'player') {
+  const value = String(role || '').trim().toLowerCase();
+  return ACCOUNT_ROLES.has(value) ? value : fallback;
+}
+
+function accountToTableRole(role) {
+  const value = cleanAccountRole(role);
+  if (value === 'owner' || value === 'admin' || value === 'warden') return 'warden';
+  if (value === 'spectator') return 'spectator';
+  return 'protagonist';
+}
+
+function cleanUsername(value) {
+  return String(value || '').trim().toLowerCase().replace(/[^a-z0-9_.-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 60);
+}
+
+function generatePassword() {
+  return `${crypto.randomBytes(3).toString('hex')}-${crypto.randomBytes(3).toString('hex')}-${crypto.randomBytes(3).toString('hex')}`;
+}
+
+function hashPassword(password, salt = crypto.randomBytes(16).toString('hex')) {
+  const iterations = 120000;
+  const hash = crypto.pbkdf2Sync(String(password || ''), salt, iterations, 32, 'sha256').toString('hex');
+  return { salt, iterations, hash };
+}
+
+function verifyPassword(password, user) {
+  if (!user?.passwordHash || !user?.passwordSalt) return false;
+  const next = crypto.pbkdf2Sync(String(password || ''), user.passwordSalt, Number(user.passwordIterations || 120000), 32, 'sha256').toString('hex');
+  try {
+    return crypto.timingSafeEqual(Buffer.from(next, 'hex'), Buffer.from(user.passwordHash, 'hex'));
+  } catch (err) {
+    return false;
+  }
+}
+
+function safeUser(user) {
+  if (!user) return null;
+  return {
+    id: user.id,
+    username: user.username,
+    displayName: user.displayName,
+    role: user.role,
+    tableCodes: Array.isArray(user.tableCodes) ? user.tableCodes : [],
+    active: user.active !== false,
+    mustResetPassword: !!user.mustResetPassword,
+    createdAt: user.createdAt,
+    updatedAt: user.updatedAt,
+    lastLoginAt: user.lastLoginAt || null,
+  };
+}
+
+function addAudit(accounts, actor, action, detail = {}) {
+  accounts.audit.push({
+    id: accounts.audit.length + 1,
+    action,
+    actorId: actor?.id || null,
+    actorName: actor?.displayName || actor?.username || null,
+    detail,
+    createdAt: new Date().toISOString(),
+  });
+  accounts.audit = accounts.audit.slice(-MAX_AUDIT);
+}
+
+function normalizeAccounts(accounts) {
+  const now = Date.now();
+  Object.keys(accounts.sessions || {}).forEach(token => {
+    const session = accounts.sessions[token];
+    if (!session?.userId || Date.parse(session.expiresAt || 0) <= now) delete accounts.sessions[token];
+  });
+  Object.values(accounts.users || {}).forEach(user => {
+    user.role = cleanAccountRole(user.role, 'player');
+    user.tableCodes = Array.isArray(user.tableCodes) ? user.tableCodes.map(code => String(code || '').trim().toUpperCase()).filter(Boolean).slice(0, 40) : [];
+    user.active = user.active !== false;
+  });
+  return accounts;
+}
+
+function createSession(accounts, user) {
+  const token = crypto.randomBytes(32).toString('hex');
+  const now = new Date();
+  const expires = new Date(now.getTime() + SESSION_TTL_MS);
+  accounts.sessions[token] = {
+    userId: user.id,
+    createdAt: now.toISOString(),
+    lastSeenAt: now.toISOString(),
+    expiresAt: expires.toISOString(),
+  };
+  user.lastLoginAt = now.toISOString();
+  return token;
+}
+
+function authToken(req) {
+  const auth = String(req.headers.authorization || '');
+  if (auth.toLowerCase().startsWith('bearer ')) return auth.slice(7).trim();
+  return String(req.headers['x-vg-token'] || '').trim();
+}
+
+function authenticatedUser(req, accounts) {
+  const token = authToken(req);
+  if (!token) return null;
+  const session = accounts.sessions?.[token];
+  if (!session || Date.parse(session.expiresAt || 0) <= Date.now()) {
+    if (session) delete accounts.sessions[token];
+    return null;
+  }
+  const user = accounts.users?.[session.userId];
+  if (!user || user.active === false) return null;
+  session.lastSeenAt = new Date().toISOString();
+  return { user, token };
+}
+
+function canManageUsers(user) {
+  return ['owner', 'admin'].includes(user?.role);
 }
 
 function code() {
@@ -1062,6 +1203,163 @@ function openLiveStream(req, res, tableCode) {
 async function handleApi(req, res, pathname) {
   if (req.method === 'GET' && pathname === '/api/health') {
     return send(res, 200, { ok: true, service: 'velvet-grimoire-sync' });
+  }
+
+  if (pathname.startsWith('/api/accounts')) {
+    const accounts = normalizeAccounts(readAccounts());
+    const accountMatch = pathname.match(/^\/api\/accounts\/users(?:\/([^/]+))?$/i);
+    const auditMatch = pathname === '/api/accounts/audit';
+
+    if (req.method === 'GET' && pathname === '/api/accounts/setup') {
+      const users = Object.values(accounts.users || {});
+      const needsSetup = !users.some(user => user.active !== false && ['owner', 'admin'].includes(user.role));
+      writeAccounts(accounts);
+      return send(res, 200, { needsSetup });
+    }
+
+    if (req.method === 'POST' && pathname === '/api/accounts/bootstrap') {
+      const users = Object.values(accounts.users || {});
+      if (users.some(user => user.active !== false && ['owner', 'admin'].includes(user.role))) {
+        return send(res, 409, { error: 'Owner account already exists.' });
+      }
+      const body = await readBody(req);
+      const now = new Date().toISOString();
+      const password = String(body.password || '').trim() || generatePassword();
+      const username = cleanUsername(body.username || 'owner');
+      if (!username) return send(res, 400, { error: 'Username is required' });
+      const hashed = hashPassword(password);
+      accounts.userSeq = Number(accounts.userSeq || 0) + 1;
+      const user = {
+        id: `user-${accounts.userSeq}`,
+        username,
+        displayName: String(body.displayName || body.name || 'Owner').trim().slice(0, 80) || 'Owner',
+        role: 'owner',
+        tableCodes: [],
+        active: true,
+        passwordHash: hashed.hash,
+        passwordSalt: hashed.salt,
+        passwordIterations: hashed.iterations,
+        mustResetPassword: !body.password,
+        createdAt: now,
+        updatedAt: now,
+      };
+      accounts.users[user.id] = user;
+      const token = createSession(accounts, user);
+      addAudit(accounts, user, 'account.bootstrap', { userId: user.id, username });
+      writeAccounts(accounts);
+      return send(res, 201, { user: safeUser(user), token, temporaryPassword: body.password ? null : password });
+    }
+
+    if (req.method === 'POST' && pathname === '/api/accounts/login') {
+      const body = await readBody(req);
+      const username = cleanUsername(body.username);
+      const user = Object.values(accounts.users || {}).find(item => item.username === username);
+      if (!user || user.active === false || !verifyPassword(body.password, user)) {
+        writeAccounts(accounts);
+        return send(res, 401, { error: 'Invalid username or password.' });
+      }
+      const token = createSession(accounts, user);
+      addAudit(accounts, user, 'account.login', { userId: user.id });
+      writeAccounts(accounts);
+      return send(res, 200, { user: safeUser(user), token });
+    }
+
+    if (req.method === 'POST' && pathname === '/api/accounts/logout') {
+      const token = authToken(req);
+      const auth = authenticatedUser(req, accounts);
+      if (token) delete accounts.sessions[token];
+      if (auth?.user) addAudit(accounts, auth.user, 'account.logout', { userId: auth.user.id });
+      writeAccounts(accounts);
+      return send(res, 200, { ok: true });
+    }
+
+    const auth = authenticatedUser(req, accounts);
+    if (!auth?.user) {
+      writeAccounts(accounts);
+      return send(res, 401, { error: 'Login required.' });
+    }
+
+    if (req.method === 'GET' && pathname === '/api/accounts/me') {
+      writeAccounts(accounts);
+      return send(res, 200, { user: safeUser(auth.user) });
+    }
+
+    if (auditMatch && req.method === 'GET') {
+      if (!canManageUsers(auth.user)) return send(res, 403, { error: 'Admin access required.' });
+      writeAccounts(accounts);
+      return send(res, 200, { audit: accounts.audit.slice().reverse().slice(0, 100) });
+    }
+
+    if (accountMatch) {
+      if (!canManageUsers(auth.user)) return send(res, 403, { error: 'Admin access required.' });
+      const userId = accountMatch[1] ? decodeURIComponent(accountMatch[1]) : null;
+
+      if (!userId && req.method === 'GET') {
+        writeAccounts(accounts);
+        return send(res, 200, { users: Object.values(accounts.users || {}).map(safeUser) });
+      }
+
+      if (!userId && req.method === 'POST') {
+        const body = await readBody(req);
+        const username = cleanUsername(body.username || body.displayName || body.name);
+        if (!username) return send(res, 400, { error: 'Username is required' });
+        if (Object.values(accounts.users || {}).some(user => user.username === username)) {
+          return send(res, 409, { error: 'Username already exists.' });
+        }
+        const password = String(body.password || '').trim() || generatePassword();
+        const hashed = hashPassword(password);
+        const now = new Date().toISOString();
+        accounts.userSeq = Number(accounts.userSeq || 0) + 1;
+        const user = {
+          id: `user-${accounts.userSeq}`,
+          username,
+          displayName: String(body.displayName || body.name || username).trim().slice(0, 80) || username,
+          role: cleanAccountRole(body.role, 'player'),
+          tableCodes: Array.isArray(body.tableCodes) ? body.tableCodes.map(code => String(code || '').trim().toUpperCase()).filter(Boolean).slice(0, 40) : [],
+          active: body.active !== false,
+          passwordHash: hashed.hash,
+          passwordSalt: hashed.salt,
+          passwordIterations: hashed.iterations,
+          mustResetPassword: true,
+          createdAt: now,
+          updatedAt: now,
+        };
+        accounts.users[user.id] = user;
+        addAudit(accounts, auth.user, 'account.created', { userId: user.id, username: user.username, role: user.role });
+        writeAccounts(accounts);
+        return send(res, 201, { user: safeUser(user), temporaryPassword: password });
+      }
+
+      const user = accounts.users?.[userId];
+      if (!user) return send(res, 404, { error: 'User not found' });
+
+      if (userId && req.method === 'PATCH') {
+        const body = await readBody(req);
+        let temporaryPassword = null;
+        if (body.displayName !== undefined) user.displayName = String(body.displayName || user.displayName).trim().slice(0, 80) || user.displayName;
+        if (body.role !== undefined) user.role = cleanAccountRole(body.role, user.role);
+        if (body.tableCodes !== undefined) user.tableCodes = Array.isArray(body.tableCodes) ? body.tableCodes.map(code => String(code || '').trim().toUpperCase()).filter(Boolean).slice(0, 40) : [];
+        if (body.active !== undefined) user.active = !!body.active;
+        if (body.resetPassword) {
+          temporaryPassword = generatePassword();
+          const hashed = hashPassword(temporaryPassword);
+          user.passwordHash = hashed.hash;
+          user.passwordSalt = hashed.salt;
+          user.passwordIterations = hashed.iterations;
+          user.mustResetPassword = true;
+          Object.keys(accounts.sessions || {}).forEach(token => {
+            if (accounts.sessions[token]?.userId === user.id) delete accounts.sessions[token];
+          });
+        }
+        user.updatedAt = new Date().toISOString();
+        addAudit(accounts, auth.user, body.resetPassword ? 'account.password_reset' : 'account.updated', { userId: user.id, username: user.username, role: user.role, active: user.active });
+        writeAccounts(accounts);
+        return send(res, 200, { user: safeUser(user), temporaryPassword });
+      }
+    }
+
+    writeAccounts(accounts);
+    return send(res, 404, { error: 'Not found' });
   }
 
   const streamMatch = pathname.match(/^\/api\/tables\/([A-Z0-9]{4,10})\/stream$/i);

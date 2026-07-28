@@ -5,6 +5,7 @@
 
 const VGSync = (() => {
   const CONFIG_KEY = 'vg_sync_config';
+  const ACCOUNT_KEY = 'vg_account_session';
   const SYNC_KEYS = [
     'vg_campaigns',
     'vg_session',
@@ -68,6 +69,26 @@ const VGSync = (() => {
     };
   }
 
+  function getAccountSession() {
+    return readJSON(ACCOUNT_KEY, null);
+  }
+
+  function saveAccountSession(session) {
+    if (!session?.token || !session?.user) localStorage.removeItem(ACCOUNT_KEY);
+    else localStorage.setItem(ACCOUNT_KEY, JSON.stringify(session));
+    return session;
+  }
+
+  function accountRoleToTableRole(role) {
+    if (['owner', 'admin', 'warden'].includes(role)) return 'warden';
+    if (role === 'spectator') return 'spectator';
+    return 'protagonist';
+  }
+
+  function effectiveClientId(config = getConfig()) {
+    return getAccountSession()?.user?.id || config.clientId;
+  }
+
   function saveConfig(config) {
     localStorage.setItem(CONFIG_KEY, JSON.stringify(config));
     return config;
@@ -99,16 +120,20 @@ const VGSync = (() => {
 
   function playerPayload(overrides = {}) {
     const config = getConfig();
+    const account = getAccountSession()?.user || null;
     return {
-      clientId: config.clientId,
-      name: overrides.name || config.playerName || defaultPlayerName(),
-      role: syncRoleToTableRole(overrides.role || config.role),
+      clientId: account?.id || config.clientId,
+      accountId: account?.id || null,
+      name: account?.displayName || overrides.name || config.playerName || defaultPlayerName(),
+      role: account ? accountRoleToTableRole(account.role) : syncRoleToTableRole(overrides.role || config.role),
       ready: overrides.ready === undefined ? !!config.ready : !!overrides.ready,
     };
   }
 
   function canWriteSharedState() {
     const config = getConfig();
+    const account = getAccountSession()?.user || null;
+    if (account) return ['owner', 'admin', 'warden'].includes(account.role);
     return syncRoleToTableRole(config.role) === 'warden';
   }
 
@@ -129,10 +154,12 @@ const VGSync = (() => {
 
   async function request(path, options = {}) {
     const config = getConfig();
+    const account = getAccountSession();
     const res = await fetch(`${config.apiBase}${path}`, {
       ...options,
       headers: {
         'Content-Type': 'application/json',
+        ...(account?.token ? { Authorization: `Bearer ${account.token}` } : {}),
         ...(options.headers || {}),
       },
     });
@@ -210,7 +237,7 @@ const VGSync = (() => {
   function streamUrl(config = getConfig()) {
     const base = new URL(config.apiBase || location.origin, location.href);
     const url = new URL(`/api/tables/${config.code}/stream`, base);
-    url.searchParams.set('clientId', config.clientId);
+    url.searchParams.set('clientId', effectiveClientId(config));
     url.searchParams.set('role', syncRoleToTableRole(config.role));
     url.searchParams.set('lastMessageId', String(lastMessageId || 0));
     url.searchParams.set('lastEventId', String(lastEventId || 0));
@@ -257,14 +284,15 @@ const VGSync = (() => {
   async function createTable(name = 'Velvet Table') {
     const config = getConfig();
     const local = snapshot();
+    const player = playerPayload({ role: 'warden' });
     const table = await request('/api/tables', {
       method: 'POST',
       body: JSON.stringify({
         name,
         snapshot: local,
-        clientId: config.clientId,
-        playerName: config.playerName || 'Warden',
-        role: 'warden',
+        clientId: player.clientId,
+        playerName: player.name || 'Warden',
+        role: player.role || 'warden',
       }),
     });
     lastTable = table;
@@ -533,7 +561,7 @@ const VGSync = (() => {
   async function fetchFlow() {
     const config = getConfig();
     if (!config.enabled || !config.code) return flowState;
-    const payload = await request(`/api/tables/${config.code}/flow?clientId=${encodeURIComponent(config.clientId)}`);
+    const payload = await request(`/api/tables/${config.code}/flow?clientId=${encodeURIComponent(effectiveClientId(config))}`);
     return applyFlowPayload(payload);
   }
 
@@ -627,7 +655,7 @@ const VGSync = (() => {
   async function fetchRooms() {
     const config = getConfig();
     if (!config.enabled || !config.code) return roomState;
-    const payload = await request(`/api/tables/${config.code}/rooms?clientId=${encodeURIComponent(config.clientId)}`);
+    const payload = await request(`/api/tables/${config.code}/rooms?clientId=${encodeURIComponent(effectiveClientId(config))}`);
     return applyRoomsPayload(payload);
   }
 
@@ -672,6 +700,77 @@ const VGSync = (() => {
       }),
     });
     return applyRoomsPayload(payload);
+  }
+
+  async function accountSetupStatus() {
+    return request('/api/accounts/setup');
+  }
+
+  async function accountBootstrap(input = {}) {
+    const payload = await request('/api/accounts/bootstrap', {
+      method: 'POST',
+      body: JSON.stringify(input),
+    });
+    saveAccountSession({ token: payload.token, user: payload.user });
+    return payload;
+  }
+
+  async function accountLogin(username, password) {
+    const payload = await request('/api/accounts/login', {
+      method: 'POST',
+      body: JSON.stringify({ username, password }),
+    });
+    saveAccountSession({ token: payload.token, user: payload.user });
+    const config = getConfig();
+    saveConfig({
+      ...config,
+      playerName: payload.user?.displayName || config.playerName,
+      role: accountRoleToTableRole(payload.user?.role || config.role),
+    });
+    callbacks.onAccount?.(payload.user);
+    if (config.enabled && config.code) openLiveStream();
+    callbacks.onStatus?.(status());
+    return payload;
+  }
+
+  async function accountLogout() {
+    await request('/api/accounts/logout', { method: 'POST' }).catch(() => null);
+    saveAccountSession(null);
+    callbacks.onAccount?.(null);
+    const config = getConfig();
+    if (config.enabled && config.code) openLiveStream();
+    callbacks.onStatus?.(status());
+  }
+
+  async function accountMe() {
+    const payload = await request('/api/accounts/me');
+    const session = getAccountSession();
+    if (session?.token) saveAccountSession({ token: session.token, user: payload.user });
+    callbacks.onAccount?.(payload.user);
+    callbacks.onStatus?.(status());
+    return payload.user;
+  }
+
+  async function accountUsers() {
+    return request('/api/accounts/users');
+  }
+
+  async function accountCreateUser(input = {}) {
+    return request('/api/accounts/users', {
+      method: 'POST',
+      body: JSON.stringify(input),
+    });
+  }
+
+  async function accountUpdateUser(userId, updates = {}) {
+    return request(`/api/accounts/users/${encodeURIComponent(userId)}`, {
+      method: 'PATCH',
+      body: JSON.stringify(updates),
+    });
+  }
+
+  async function accountAudit() {
+    return request('/api/accounts/audit');
   }
 
   async function updatePlayer(updates = {}) {
@@ -790,14 +889,16 @@ const VGSync = (() => {
 
   function status() {
     const config = getConfig();
+    const account = getAccountSession()?.user || null;
     return {
       enabled: !!config.enabled,
       code: config.code || '',
       apiBase: config.apiBase,
       lastRev: config.lastRev || 0,
       clientId: config.clientId,
-      playerName: config.playerName || defaultPlayerName(),
-      role: syncRoleToTableRole(config.role || localStorage.getItem('vg_role')),
+      playerName: account?.displayName || config.playerName || defaultPlayerName(),
+      role: account ? accountRoleToTableRole(account.role) : syncRoleToTableRole(config.role || localStorage.getItem('vg_role')),
+      account,
       ready: !!config.ready,
       canWriteSharedState: canWriteSharedState(),
       liveState,
@@ -853,6 +954,16 @@ const VGSync = (() => {
     createRoom,
     updateRoom,
     sendRoomMessage,
+    getAccountSession,
+    accountSetupStatus,
+    accountBootstrap,
+    accountLogin,
+    accountLogout,
+    accountMe,
+    accountUsers,
+    accountCreateUser,
+    accountUpdateUser,
+    accountAudit,
     updatePlayer,
     setReady,
     pull,

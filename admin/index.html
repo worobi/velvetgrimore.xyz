@@ -745,6 +745,33 @@ hr.divider { border: none; border-top: 1px solid var(--border); margin: 24px 0; 
       <div id="syncLobby" style="display:grid;gap:8px;margin-top:12px;"></div>
       <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(290px,1fr));gap:12px;margin-top:14px;align-items:start;">
       <div style="border-top:1px solid var(--border);padding-top:12px;">
+        <div style="font-family:'Cinzel',serif;color:var(--gold);font-size:12px;letter-spacing:1px;text-transform:uppercase;margin-bottom:8px;">Accounts</div>
+        <div id="accountStatus" style="font-size:13px;color:var(--text-dim);line-height:1.6;margin-bottom:8px;">Checking account setup...</div>
+        <div style="display:grid;gap:8px;margin-bottom:10px;">
+          <input type="text" id="accountLoginUsername" placeholder="Username">
+          <input type="password" id="accountLoginPassword" placeholder="Password" onkeydown="if(event.key==='Enter') loginAccount()">
+          <div class="flex gap-8" style="flex-wrap:wrap;">
+            <button class="btn btn-gold btn-sm" onclick="loginAccount()">Login</button>
+            <button class="btn btn-ghost btn-sm" onclick="bootstrapOwnerAccount()">First Owner</button>
+            <button class="btn btn-ghost btn-sm" onclick="logoutAccount()">Logout</button>
+          </div>
+        </div>
+        <div style="border-top:1px solid var(--border);padding-top:10px;display:grid;gap:8px;">
+          <input type="text" id="accountNewName" placeholder="Display name">
+          <input type="text" id="accountNewUsername" placeholder="Username">
+          <select id="accountNewRole">
+            <option value="player">Player</option>
+            <option value="spectator">Spectator</option>
+            <option value="warden">Warden</option>
+            <option value="admin">Admin</option>
+          </select>
+          <input type="text" id="accountNewTables" placeholder="Table codes, comma separated">
+          <button class="btn btn-gold btn-sm" onclick="createAccountUser()">Generate User</button>
+        </div>
+        <div id="accountGenerated" style="font-size:13px;color:var(--gold);line-height:1.6;margin-top:8px;"></div>
+        <div id="accountUserList" style="display:grid;gap:8px;max-height:260px;overflow:auto;background:rgba(0,0,0,0.18);border:1px solid var(--border);border-radius:6px;padding:10px;margin-top:10px;"></div>
+      </div>
+      <div style="border-top:1px solid var(--border);padding-top:12px;">
         <div style="font-family:'Cinzel',serif;color:var(--gold);font-size:12px;letter-spacing:1px;text-transform:uppercase;margin-bottom:8px;">Table Flow</div>
         <div id="syncFlowSummary" style="font-size:13px;color:var(--text-dim);line-height:1.6;margin-bottom:8px;">No spotlight set.</div>
         <div style="display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:8px;margin-bottom:8px;">
@@ -1326,6 +1353,7 @@ function initRemoteSync() {
     onCheckpoints: renderSyncCheckpoints,
     onFlow: renderSyncFlow,
     onRooms: renderSyncRooms,
+    onAccount: renderAccountAdmin,
     onError: err => updateSyncStatus({ ...VGSync.status(), error: err.message }),
   });
   updateSyncStatus(VGSync.status());
@@ -1335,6 +1363,7 @@ function initRemoteSync() {
   renderSyncCheckpoints(cfg.checkpoints || []);
   renderSyncFlow(cfg.flow || null);
   renderSyncRooms(cfg.rooms || null);
+  initAccountAdmin();
 }
 
 function updateSyncStatus(status = (window.VGSync ? VGSync.status() : null)) {
@@ -1371,6 +1400,161 @@ function renderSyncLobby(table = (window.VGSync ? VGSync.status().table : null))
     </div>
   `).join('');
   renderSyncFlow(window.VGSync ? VGSync.status() : null);
+}
+
+async function initAccountAdmin() {
+  if (!window.VGSync) return;
+  try {
+    const setup = await VGSync.accountSetupStatus();
+    const session = VGSync.getAccountSession();
+    if (session?.token) await VGSync.accountMe().catch(() => null);
+    renderAccountAdmin({ setup });
+    if (VGSync.getAccountSession()?.user) await refreshAccountUsers();
+  } catch (err) {
+    const el = document.getElementById('accountStatus');
+    if (el) el.textContent = `Account setup unavailable: ${err.message}`;
+  }
+}
+
+function renderAccountAdmin(context = {}) {
+  const statusEl = document.getElementById('accountStatus');
+  const session = window.VGSync ? VGSync.getAccountSession() : null;
+  if (statusEl) {
+    if (session?.user) {
+      statusEl.textContent = `Logged in as ${session.user.displayName || session.user.username} · ${session.user.role}`;
+    } else if (context.setup?.needsSetup) {
+      statusEl.textContent = 'No owner account exists yet. Create the first Owner account.';
+    } else {
+      statusEl.textContent = 'Login to manage generated users.';
+    }
+  }
+}
+
+async function bootstrapOwnerAccount() {
+  if (!window.VGSync) return;
+  const username = document.getElementById('accountLoginUsername')?.value || 'owner';
+  const password = document.getElementById('accountLoginPassword')?.value || '';
+  try {
+    const payload = await VGSync.accountBootstrap({ username, password, displayName: 'Owner' });
+    document.getElementById('accountGenerated').textContent = payload.temporaryPassword
+      ? `Owner created. Temporary password: ${payload.temporaryPassword}`
+      : 'Owner account created.';
+    renderAccountAdmin();
+    await refreshAccountUsers();
+    toast('Owner account ready.', 'success');
+  } catch (err) {
+    toast(`Owner setup failed: ${err.message}`, 'error');
+  }
+}
+
+async function loginAccount() {
+  if (!window.VGSync) return;
+  const username = document.getElementById('accountLoginUsername')?.value || '';
+  const password = document.getElementById('accountLoginPassword')?.value || '';
+  try {
+    await VGSync.accountLogin(username, password);
+    document.getElementById('accountGenerated').textContent = '';
+    renderAccountAdmin();
+    await refreshAccountUsers();
+    toast('Logged in.', 'success');
+  } catch (err) {
+    toast(`Login failed: ${err.message}`, 'error');
+  }
+}
+
+async function logoutAccount() {
+  if (!window.VGSync) return;
+  await VGSync.accountLogout();
+  document.getElementById('accountUserList').innerHTML = '';
+  renderAccountAdmin();
+  toast('Logged out.', 'warn');
+}
+
+function accountTableCodes() {
+  return (document.getElementById('accountNewTables')?.value || '')
+    .split(',')
+    .map(code => code.trim().toUpperCase())
+    .filter(Boolean);
+}
+
+async function createAccountUser() {
+  if (!window.VGSync) return;
+  const displayName = document.getElementById('accountNewName')?.value || '';
+  const username = document.getElementById('accountNewUsername')?.value || displayName;
+  try {
+    const payload = await VGSync.accountCreateUser({
+      displayName,
+      username,
+      role: document.getElementById('accountNewRole')?.value || 'player',
+      tableCodes: accountTableCodes(),
+    });
+    document.getElementById('accountGenerated').textContent = `Generated ${payload.user.username}: ${payload.temporaryPassword}`;
+    ['accountNewName', 'accountNewUsername', 'accountNewTables'].forEach(id => {
+      const el = document.getElementById(id);
+      if (el) el.value = '';
+    });
+    await refreshAccountUsers();
+    toast('User generated.', 'success');
+  } catch (err) {
+    toast(`User generation failed: ${err.message}`, 'error');
+  }
+}
+
+async function refreshAccountUsers() {
+  if (!window.VGSync) return;
+  const list = document.getElementById('accountUserList');
+  if (!list) return;
+  try {
+    const payload = await VGSync.accountUsers();
+    renderAccountUserList(payload.users || []);
+  } catch (err) {
+    list.innerHTML = `<div style="font-size:12px;color:var(--text-muted);font-style:italic;">${escHtml(err.message)}</div>`;
+  }
+}
+
+function renderAccountUserList(users = []) {
+  const list = document.getElementById('accountUserList');
+  if (!list) return;
+  if (!users.length) {
+    list.innerHTML = `<div style="font-size:12px;color:var(--text-muted);font-style:italic;">No generated users yet.</div>`;
+    return;
+  }
+  list.innerHTML = users.map(user => `
+    <div style="border-bottom:1px solid rgba(255,255,255,0.04);padding-bottom:8px;">
+      <div style="display:flex;justify-content:space-between;gap:8px;font-size:12px;color:var(--text-muted);">
+        <span><strong style="color:var(--text);">${escHtml(user.displayName || user.username)}</strong> · ${escHtml(user.username)} · ${escHtml(user.role)}</span>
+        <span style="color:${user.active ? '#9edc9e' : '#ff8888'};">${user.active ? 'active' : 'disabled'}</span>
+      </div>
+      <div style="font-size:12px;color:var(--text-muted);margin-top:3px;">Tables: ${escHtml((user.tableCodes || []).join(', ') || 'all/manual')}</div>
+      <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:7px;">
+        <button class="btn btn-ghost btn-sm" onclick="resetAccountPassword('${escHtml(user.id)}')">Reset</button>
+        <button class="btn btn-ghost btn-sm" onclick="toggleAccountActive('${escHtml(user.id)}', ${user.active ? 'false' : 'true'})">${user.active ? 'Disable' : 'Enable'}</button>
+      </div>
+    </div>
+  `).join('');
+}
+
+async function resetAccountPassword(userId) {
+  if (!window.VGSync) return;
+  try {
+    const payload = await VGSync.accountUpdateUser(userId, { resetPassword: true });
+    document.getElementById('accountGenerated').textContent = `Reset ${payload.user.username}: ${payload.temporaryPassword}`;
+    await refreshAccountUsers();
+    toast('Password reset.', 'success');
+  } catch (err) {
+    toast(`Reset failed: ${err.message}`, 'error');
+  }
+}
+
+async function toggleAccountActive(userId, active) {
+  if (!window.VGSync) return;
+  try {
+    await VGSync.accountUpdateUser(userId, { active });
+    await refreshAccountUsers();
+    toast(active ? 'User enabled.' : 'User disabled.', 'warn');
+  } catch (err) {
+    toast(`Update failed: ${err.message}`, 'error');
+  }
 }
 
 function syncTargetOptions(selected = '') {
