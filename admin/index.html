@@ -36,13 +36,17 @@
   --freeze: #aa8800;
 }
 * { box-sizing: border-box; margin: 0; padding: 0; }
+html {
+  min-height: 100%;
+  overflow-y: auto;
+}
 body {
   background: var(--bg);
   color: var(--text);
   font-family: 'Crimson Pro', serif;
   font-size: 16px;
   min-height: 100vh;
-  display: flex;
+  overflow-y: auto;
 }
 
 /* Layout */
@@ -54,7 +58,7 @@ body {
   position: fixed; top: 0; left: 0; bottom: 0;
   z-index: 10; overflow-y: auto;
 }
-.main { margin-left: 260px; flex: 1; padding: 32px 36px; min-height: 100vh; }
+.main { margin-left: 260px; width: calc(100% - 260px); padding: 32px 36px 96px; min-height: 100vh; }
 
 /* Sidebar */
 .sidebar-logo {
