@@ -1567,7 +1567,7 @@ async function createAccountInvite() {
       tableCodes: accountTableCodes('accountInviteTables'),
     });
     const invite = payload.invite;
-    const link = new URL(`/player/?invite=${encodeURIComponent(invite.code)}`, location.origin).toString();
+    const link = new URL(`/player/player.html?invite=${encodeURIComponent(invite.code)}`, location.origin).toString();
     document.getElementById('accountInviteGenerated').textContent = `Invite ${invite.code}: ${link}`;
     ['accountInviteName', 'accountInviteUsername', 'accountInviteTables'].forEach(id => {
       const el = document.getElementById(id);
