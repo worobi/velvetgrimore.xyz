@@ -7,7 +7,7 @@ const path = require('path');
 const crypto = require('crypto');
 
 const ROOT = __dirname;
-const DATA_DIR = process.env.DATA_DIR || path.join(ROOT, 'server-data');
+const DATA_DIR = process.env.DATA_DIR || (fs.existsSync('/data') ? '/data' : path.join(ROOT, 'server-data'));
 const TABLES_FILE = path.join(DATA_DIR, 'tables.json');
 const PORT = Number(process.env.PORT || 8765);
 const PLAYER_ROLES = new Set(['warden', 'protagonist', 'boss', 'spectator']);
