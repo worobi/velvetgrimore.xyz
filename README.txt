@@ -16,6 +16,7 @@ VPS BACKEND MODE
 3. Point the domain/proxy at the Node service so `/` and `/api/` share the same domain.
 4. In Admin -> Settings -> Remote Multiplayer, create a table code.
 5. Send the code to the player.
+6. Use the lobby roster to verify each player role and ready state.
 
 WHAT IS INCLUDED
 - index.html: landing, age gate, role picker, demo loader
@@ -31,7 +32,7 @@ WHAT IS INCLUDED
 - engine/intimacy.js: scene chat, consent ceiling, heat, prompt, and want/boundary card layer
 - server.js: Node backend for static hosting and remote table sync
 - package.json: npm start entrypoint for the backend
-- Dockerfile: Coolify/container entrypoint for the backend
+- Dockerfile: Coolify/container entrypoint for the backend; expects persistent data at /data
 - deploy/velvetgrimore.service: systemd service template
 - deploy/nginx-velvetgrimore.conf: nginx reverse-proxy template
 - pause.html: Threshold, Ember, Hearth, and Compact surface
@@ -46,6 +47,8 @@ KNOWN LIMITATIONS
 - State is stored in the browser. Clearing browser data clears campaigns unless you export a backup first.
 - Remote play requires the included VPS backend (`node server.js`) or an equivalent hosted `/api/` service.
 - Table-code sync currently uses whole-snapshot, last-write-wins conflict handling.
+- Multiplayer V1 includes table codes, player names, roles, ready state, and lobby presence.
+- In Docker/Coolify, mount persistent storage at `/data` so table-code state survives rebuilds.
 - Discord webhooks send selected events to Discord only if you configure one.
 - Before private play, replace demo characters, safety answers, and ward decisions with your real table's choices.
 

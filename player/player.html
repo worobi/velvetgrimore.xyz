@@ -412,10 +412,23 @@ function render(session) {
           <div style="font-family:'Cinzel',serif;color:var(--gold);font-size:14px;letter-spacing:1px;margin-bottom:6px;">Join Remote Table</div>
           <p style="font-size:14px;line-height:1.6;">Enter the table code from the Warden. The backend URL defaults to this site.</p>
           <div class="remote-join-row">
+            <input type="text" id="playerSyncName" placeholder="Your table name">
+            <select id="playerSyncRole" style="background:rgba(255,255,255,0.035);border:1px solid var(--border);border-radius:4px;padding:10px 12px;color:var(--text);">
+              <option value="protagonist">Protagonist</option>
+              <option value="boss">Boss</option>
+              <option value="spectator">Spectator</option>
+            </select>
+          </div>
+          <div class="remote-join-row">
             <input type="text" id="playerSyncCode" placeholder="ABC123">
             <button class="btn btn-purple" onclick="joinRemoteTableFromPlayer()">Join</button>
           </div>
+          <div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap;">
+            <button class="btn btn-ghost" onclick="playerRefreshLobby()">Refresh Lobby</button>
+            <button class="btn btn-ghost" onclick="playerToggleReady()">Toggle Ready</button>
+          </div>
           <div id="playerSyncStatus" style="font-size:13px;color:var(--text-muted);margin-top:10px;"></div>
+          <div id="playerSyncLobby" style="display:grid;gap:8px;margin-top:12px;"></div>
         </div>
       </div>`;
     return;
@@ -579,6 +592,7 @@ function initRemoteSync() {
       refreshView();
     },
     onStatus: updatePlayerSyncStatus,
+    onLobby: renderPlayerLobby,
     onError: err => updatePlayerSyncStatus({ ...VGSync.status(), error: err.message }),
   });
 }
@@ -587,21 +601,66 @@ function updatePlayerSyncStatus(status = (window.VGSync ? VGSync.status() : null
   const el = document.getElementById('playerSyncStatus');
   if (!el || !status) return;
   el.textContent = status.enabled && status.code
-    ? `Connected to table ${status.code} · revision ${status.lastRev || 0}${status.error ? ` · ${status.error}` : ''}`
+    ? `Connected to table ${status.code} · ${status.role || 'protagonist'} · ${status.ready ? 'ready' : 'not ready'} · revision ${status.lastRev || 0}${status.error ? ` · ${status.error}` : ''}`
     : (status.error ? `Sync error: ${status.error}` : '');
+  renderPlayerLobby(status.table);
+}
+
+function renderPlayerLobby(table = (window.VGSync ? VGSync.status().table : null)) {
+  const el = document.getElementById('playerSyncLobby');
+  if (!el) return;
+  const players = table?.players || [];
+  if (!players.length) {
+    el.innerHTML = '';
+    return;
+  }
+  el.innerHTML = players.map(player => `
+    <div style="display:flex;justify-content:space-between;gap:12px;align-items:center;background:rgba(255,255,255,0.025);border:1px solid var(--border);border-radius:6px;padding:8px 10px;">
+      <div><strong style="color:var(--text);">${escapeHtml(player.name || 'Seated Player')}</strong><span style="color:var(--text-muted);font-size:12px;"> · ${escapeHtml(player.role || 'protagonist')}</span></div>
+      <div style="font-size:12px;color:${player.ready ? 'var(--gold)' : 'var(--text-muted)'};">${player.ready ? 'ready' : 'not ready'}</div>
+    </div>
+  `).join('');
 }
 
 async function joinRemoteTableFromPlayer() {
   if (!window.VGSync) return;
   const code = document.getElementById('playerSyncCode')?.value || '';
+  const name = document.getElementById('playerSyncName')?.value || 'Protagonist';
+  const role = document.getElementById('playerSyncRole')?.value || 'protagonist';
   try {
-    await VGSync.joinTable(code);
+    const table = await VGSync.joinTable(code, { name, role, ready: true });
     localStorage.setItem('vg_role', 'player');
+    renderPlayerLobby(table.table);
     VGEngine.resumeSession();
     refreshView();
   } catch (err) {
     updatePlayerSyncStatus({ ...VGSync.status(), error: err.message });
     showToast(`Join failed: ${err.message}`);
+  }
+}
+
+async function playerRefreshLobby() {
+  if (!window.VGSync) return;
+  try {
+    const table = await VGSync.fetchLobby();
+    renderPlayerLobby(table);
+    updatePlayerSyncStatus(VGSync.status());
+  } catch (err) {
+    updatePlayerSyncStatus({ ...VGSync.status(), error: err.message });
+    showToast(`Lobby refresh failed: ${err.message}`);
+  }
+}
+
+async function playerToggleReady() {
+  if (!window.VGSync) return;
+  try {
+    const status = VGSync.status();
+    const table = await VGSync.setReady(!status.ready);
+    renderPlayerLobby(table);
+    updatePlayerSyncStatus(VGSync.status());
+  } catch (err) {
+    updatePlayerSyncStatus({ ...VGSync.status(), error: err.message });
+    showToast(`Ready update failed: ${err.message}`);
   }
 }
 

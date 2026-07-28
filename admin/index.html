@@ -692,6 +692,8 @@ hr.divider { border: none; border-top: 1px solid var(--border); margin: 24px 0; 
       </p>
       <label>Backend URL</label>
       <input type="url" id="syncApiBase" placeholder="Same site, e.g. https://velvetgrimore.xyz">
+      <label>Your Table Name</label>
+      <input type="text" id="syncPlayerName" placeholder="Warden">
       <label>Table Code</label>
       <div class="flex gap-8">
         <input type="text" id="syncTableCode" placeholder="ABC123" style="text-transform:uppercase;">
@@ -700,9 +702,12 @@ hr.divider { border: none; border-top: 1px solid var(--border); margin: 24px 0; 
       </div>
       <div class="flex gap-8 mt-16" style="flex-wrap:wrap;">
         <button class="btn btn-ghost btn-sm" onclick="syncNow()">Sync Now</button>
+        <button class="btn btn-ghost btn-sm" onclick="refreshLobby()">Refresh Lobby</button>
+        <button class="btn btn-gold btn-sm" onclick="toggleReady()">Toggle Ready</button>
         <button class="btn btn-ghost btn-sm" onclick="stopSync()">Stop Sync</button>
       </div>
       <div id="syncStatus" style="font-size:13px;color:var(--text-dim);line-height:1.7;margin-top:12px;">Remote sync is off.</div>
+      <div id="syncLobby" style="display:grid;gap:8px;margin-top:12px;"></div>
     </div>
     <div class="card">
       <div class="card-title">About</div>
@@ -1134,8 +1139,10 @@ function initRemoteSync() {
   const cfg = VGSync.getConfig();
   const api = document.getElementById('syncApiBase');
   const code = document.getElementById('syncTableCode');
+  const name = document.getElementById('syncPlayerName');
   if (api) api.value = cfg.apiBase || location.origin;
   if (code) code.value = cfg.code || '';
+  if (name) name.value = cfg.playerName || 'Warden';
   VGSync.start({
     onApply: () => {
       VGEngine.resumeSession();
@@ -1145,26 +1152,54 @@ function initRemoteSync() {
       if (document.getElementById('panel-session')?.classList.contains('active')) renderSession();
     },
     onStatus: updateSyncStatus,
+    onLobby: renderSyncLobby,
     onError: err => updateSyncStatus({ ...VGSync.status(), error: err.message }),
   });
   updateSyncStatus(VGSync.status());
+  renderSyncLobby(cfg.table);
 }
 
 function updateSyncStatus(status = (window.VGSync ? VGSync.status() : null)) {
   const el = document.getElementById('syncStatus');
   if (!el || !status) return;
   const state = status.enabled && status.code
-    ? `Remote sync is on. Table code: ${escHtml(status.code)} · revision ${status.lastRev || 0}`
+    ? `Remote sync is on. Table code: ${escHtml(status.code)} · revision ${status.lastRev || 0} · ${escHtml(status.role || 'warden')}${status.ready ? ' · ready' : ''}`
     : 'Remote sync is off.';
   el.innerHTML = status.error
     ? `${state}<br><span style="color:var(--red-bright);">Last error: ${escHtml(status.error)}</span>`
     : state;
+  renderSyncLobby(status.table);
+}
+
+function renderSyncLobby(table = (window.VGSync ? VGSync.status().table : null)) {
+  const el = document.getElementById('syncLobby');
+  if (!el) return;
+  const players = table?.players || [];
+  if (!players.length) {
+    el.innerHTML = `<div style="font-size:12px;color:var(--text-muted);font-style:italic;">No players seated yet.</div>`;
+    return;
+  }
+  el.innerHTML = players.map(player => `
+    <div style="display:flex;justify-content:space-between;gap:12px;align-items:center;background:rgba(255,255,255,0.025);border:1px solid var(--border);border-radius:6px;padding:9px 12px;">
+      <div>
+        <strong style="color:var(--text);">${escHtml(player.name || 'Seated Player')}</strong>
+        <span style="color:var(--text-muted);font-size:12px;"> · ${escHtml(player.role || 'protagonist')}</span>
+      </div>
+      <div style="font-size:12px;color:${player.ready ? 'var(--gold)' : 'var(--text-muted)'};">${player.ready ? 'ready' : 'not ready'}</div>
+    </div>
+  `).join('');
 }
 
 function syncInputsToConfig() {
   if (!window.VGSync) return;
   const api = document.getElementById('syncApiBase')?.value || location.origin;
   VGSync.setApiBase(api);
+  const cfg = VGSync.getConfig();
+  VGSync.saveConfig({
+    ...cfg,
+    playerName: document.getElementById('syncPlayerName')?.value || 'Warden',
+    role: 'warden',
+  });
 }
 
 async function createRemoteTable() {
@@ -1195,6 +1230,31 @@ async function joinRemoteTable() {
     updateSyncStatus(VGSync.status());
   } catch (err) {
     toast(`Join failed: ${err.message}`, 'error');
+    updateSyncStatus({ ...VGSync.status(), error: err.message });
+  }
+}
+
+async function refreshLobby() {
+  if (!window.VGSync) return;
+  try {
+    const table = await VGSync.fetchLobby();
+    renderSyncLobby(table);
+    updateSyncStatus(VGSync.status());
+  } catch (err) {
+    toast(`Lobby refresh failed: ${err.message}`, 'error');
+    updateSyncStatus({ ...VGSync.status(), error: err.message });
+  }
+}
+
+async function toggleReady() {
+  if (!window.VGSync) return;
+  try {
+    const status = VGSync.status();
+    const table = await VGSync.setReady(!status.ready);
+    renderSyncLobby(table);
+    updateSyncStatus(VGSync.status());
+  } catch (err) {
+    toast(`Ready update failed: ${err.message}`, 'error');
     updateSyncStatus({ ...VGSync.status(), error: err.message });
   }
 }

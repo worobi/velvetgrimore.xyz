@@ -46,6 +46,7 @@ Coolify:
 
   Deploy this repo as a Dockerfile app.
   Container port: 80
+  Persistent storage: mount a volume at /data
   Public domains: velvetgrimore.xyz, www.velvetgrimore.xyz, vg.highfunctioningchaos.living
   Current host: 159.198.39.151
   SSH port for server maintenance: 22022
@@ -56,6 +57,7 @@ The included Dockerfile runs:
   node server.js
 
 with PORT=80 inside the container.
+Table data is written to DATA_DIR, which defaults to /data in the Docker image.
 
 Current production routing is Coolify/Traefik -> the app container -> node server.js.
 This GitHub repo is the source of truth for future Coolify rebuilds.
@@ -103,12 +105,13 @@ In the app:
 2. Leave Backend URL as the site URL.
 3. Click Create.
 4. Share the table code with the player.
-5. Player opens /player/player.html, enters the code, and joins.
+5. Player opens /player/player.html, enters their table name and role, then joins.
+6. Use the lobby roster to confirm each seated player is present and ready.
 
 DATA MODEL
 All app data is browser-local unless a Discord webhook is configured.
 The Intimate Table layer stores scene chat, consent ceiling, heat, and want/boundary cards in browser storage.
-In VPS backend mode, synced table snapshots are also stored on the VPS in server-data/tables.json.
+In VPS backend mode, synced table snapshots and lobby player records are also stored on the VPS in DATA_DIR/tables.json.
 
 Before real play:
 1. Open Admin -> Settings -> Backup Everything.

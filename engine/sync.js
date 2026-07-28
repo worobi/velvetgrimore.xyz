@@ -24,6 +24,7 @@ const VGSync = (() => {
   let callbacks = {};
   let lastFingerprint = '';
   let busy = false;
+  let lastTable = null;
 
   function uid() {
     return Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
@@ -49,6 +50,8 @@ const VGSync = (() => {
       apiBase: location.origin,
       code: '',
       role: localStorage.getItem('vg_role') || 'player',
+      playerName: existing.playerName || defaultPlayerName(),
+      ready: false,
       lastRev: 0,
       clientId: existing.clientId,
       ...existing,
@@ -69,6 +72,28 @@ const VGSync = (() => {
       version: 1,
       keys: values,
       capturedAt: new Date().toISOString(),
+    };
+  }
+
+  function defaultPlayerName() {
+    const role = localStorage.getItem('vg_role') || 'player';
+    return role === 'dm' ? 'Warden' : 'Protagonist';
+  }
+
+  function syncRoleToTableRole(role) {
+    if (role === 'dm' || role === 'warden') return 'warden';
+    if (role === 'boss') return 'boss';
+    if (role === 'spectator') return 'spectator';
+    return 'protagonist';
+  }
+
+  function playerPayload(overrides = {}) {
+    const config = getConfig();
+    return {
+      clientId: config.clientId,
+      name: overrides.name || config.playerName || defaultPlayerName(),
+      role: syncRoleToTableRole(overrides.role || config.role),
+      ready: overrides.ready === undefined ? !!config.ready : !!overrides.ready,
     };
   }
 
@@ -106,32 +131,92 @@ const VGSync = (() => {
     const local = snapshot();
     const table = await request('/api/tables', {
       method: 'POST',
-      body: JSON.stringify({ name, snapshot: local, clientId: config.clientId }),
+      body: JSON.stringify({
+        name,
+        snapshot: local,
+        clientId: config.clientId,
+        playerName: config.playerName || 'Warden',
+        role: 'warden',
+      }),
     });
-    const next = saveConfig({ ...config, enabled: true, code: table.code, lastRev: table.rev });
+    lastTable = table;
+    const next = saveConfig({ ...config, enabled: true, code: table.code, lastRev: table.rev, role: 'warden', ready: true });
     lastFingerprint = fingerprint(local);
     start(callbacks);
     callbacks.onStatus?.(status());
     return { table, config: next };
   }
 
-  async function joinTable(code) {
+  async function joinTable(code, options = {}) {
     const config = getConfig();
     const normalized = String(code || '').trim().toUpperCase();
     if (!normalized) throw new Error('Enter a table code.');
     const table = await request(`/api/tables/${normalized}`);
     applySnapshot(table.snapshot);
-    const next = saveConfig({ ...config, enabled: true, code: table.code, lastRev: table.rev });
+    const role = options.role || syncRoleToTableRole(config.role);
+    const playerName = options.name || config.playerName || defaultPlayerName();
+    const joined = await request(`/api/tables/${normalized}/players`, {
+      method: 'POST',
+      body: JSON.stringify(playerPayload({ name: playerName, role, ready: !!options.ready })),
+    });
+    lastTable = joined;
+    const next = saveConfig({
+      ...config,
+      enabled: true,
+      code: table.code,
+      lastRev: joined.rev || table.rev,
+      role,
+      playerName,
+      ready: !!options.ready,
+    });
     lastFingerprint = fingerprint(table.snapshot);
     start(callbacks);
     callbacks.onStatus?.(status());
-    return { table, config: next };
+    return { table: joined, config: next };
+  }
+
+  async function fetchLobby() {
+    const config = getConfig();
+    if (!config.code) return null;
+    const table = await request(`/api/tables/${config.code}`);
+    lastTable = table;
+    callbacks.onLobby?.(table);
+    callbacks.onStatus?.(status());
+    return table;
+  }
+
+  async function updatePlayer(updates = {}) {
+    const config = getConfig();
+    if (!config.code) throw new Error('Join or create a table first.');
+    const nextConfig = saveConfig({
+      ...config,
+      playerName: updates.name || config.playerName || defaultPlayerName(),
+      role: updates.role || config.role,
+      ready: updates.ready === undefined ? !!config.ready : !!updates.ready,
+    });
+    const table = await request(`/api/tables/${config.code}/players/${encodeURIComponent(config.clientId)}`, {
+      method: 'PATCH',
+      body: JSON.stringify(playerPayload({
+        name: nextConfig.playerName,
+        role: nextConfig.role,
+        ready: nextConfig.ready,
+      })),
+    });
+    lastTable = table;
+    callbacks.onLobby?.(table);
+    callbacks.onStatus?.(status());
+    return table;
+  }
+
+  async function setReady(ready) {
+    return updatePlayer({ ready: !!ready });
   }
 
   async function pull() {
     const config = getConfig();
     if (!config.enabled || !config.code) return null;
     const table = await request(`/api/tables/${config.code}`);
+    lastTable = table;
     if (table.rev > (config.lastRev || 0)) {
       if (table.updatedBy !== config.clientId) {
         applySnapshot(table.snapshot);
@@ -155,8 +240,10 @@ const VGSync = (() => {
         snapshot: local,
         baseRev: config.lastRev || 0,
         clientId: config.clientId,
+        player: playerPayload(),
       }),
     });
+    lastTable = table;
     saveConfig({ ...config, lastRev: table.rev });
     lastFingerprint = current;
     callbacks.onStatus?.(status());
@@ -201,6 +288,11 @@ const VGSync = (() => {
       apiBase: config.apiBase,
       lastRev: config.lastRev || 0,
       clientId: config.clientId,
+      playerName: config.playerName || defaultPlayerName(),
+      role: syncRoleToTableRole(config.role || localStorage.getItem('vg_role')),
+      ready: !!config.ready,
+      table: lastTable,
+      players: lastTable?.players || [],
     };
   }
 
@@ -216,6 +308,9 @@ const VGSync = (() => {
     setApiBase,
     createTable,
     joinTable,
+    fetchLobby,
+    updatePlayer,
+    setReady,
     pull,
     push,
     tick,
