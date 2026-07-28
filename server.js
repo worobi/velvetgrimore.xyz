@@ -17,6 +17,8 @@ const MAX_EVENTS = 500;
 const MAX_CHECKPOINTS = 30;
 const MAX_PROMPTS = 80;
 const MAX_HANDOUTS = 80;
+const MAX_ROOMS = 40;
+const MAX_ROOM_MESSAGES = 300;
 const LIVE_KEEPALIVE_MS = 15_000;
 const EVENT_TYPES = new Set([
   'table.created',
@@ -31,6 +33,9 @@ const EVENT_TYPES = new Set([
   'prompt.sent',
   'prompt.responded',
   'handout.sent',
+  'room.created',
+  'room.updated',
+  'room.message',
   'dice.roll',
   'scene.change',
   'safety.signal',
@@ -57,6 +62,9 @@ const EVENT_CATEGORIES = {
   'prompt.sent': 'table',
   'prompt.responded': 'table',
   'handout.sent': 'table',
+  'room.created': 'table',
+  'room.updated': 'table',
+  'room.message': 'chat',
   'dice.roll': 'roll',
   'scene.change': 'scene',
   'safety.signal': 'safety',
@@ -151,6 +159,8 @@ function normalizeTable(table) {
   if (!Array.isArray(table.checkpoints)) table.checkpoints = [];
   if (!Array.isArray(table.prompts)) table.prompts = [];
   if (!Array.isArray(table.handouts)) table.handouts = [];
+  if (!Array.isArray(table.rooms)) table.rooms = [];
+  if (!Array.isArray(table.roomMessages)) table.roomMessages = [];
   table.createdAt = table.createdAt || now;
   table.updatedAt = table.updatedAt || table.createdAt;
   table.status = table.status || 'lobby';
@@ -161,6 +171,8 @@ function normalizeTable(table) {
   table.checkpointSeq = Number(table.checkpointSeq || 0);
   table.promptSeq = Number(table.promptSeq || 0);
   table.handoutSeq = Number(table.handoutSeq || 0);
+  table.roomSeq = Number(table.roomSeq || 0);
+  table.roomMsgSeq = Number(table.roomMsgSeq || 0);
   table.flow = table.flow && typeof table.flow === 'object' && !Array.isArray(table.flow) ? table.flow : {};
   table.flow.focusClientId = String(table.flow.focusClientId || '').slice(0, 80);
   table.flow.focusName = String(table.flow.focusName || '').slice(0, 80);
@@ -242,6 +254,27 @@ function normalizeTable(table) {
     createdByName: handout.createdByName || null,
   })).filter(handout => handout.title.trim() || handout.text.trim()).slice(-MAX_HANDOUTS);
   table.handoutSeq = Math.max(table.handoutSeq, ...table.handouts.map(handout => handout.id), 0);
+  if (!table.rooms.length) table.rooms = defaultRooms(now);
+  table.rooms = table.rooms.map((room, index) => ({
+    id: cleanRoomId(room.id || `room-${index + 1}`),
+    name: String(room.name || `Room ${index + 1}`).slice(0, 80),
+    kind: ['main', 'private', 'split', 'safety', 'warden'].includes(room.kind) ? room.kind : 'split',
+    members: cleanRoomMembers(room.members),
+    active: room.active !== false,
+    createdAt: room.createdAt || now,
+    createdBy: room.createdBy || null,
+    createdByName: room.createdByName || null,
+  })).filter(room => room.id && room.name.trim()).slice(-MAX_ROOMS);
+  table.roomMessages = table.roomMessages.map((message, index) => ({
+    id: Number(message.id || index + 1),
+    roomId: cleanRoomId(message.roomId || 'main'),
+    clientId: String(message.clientId || '').slice(0, 80),
+    name: String(message.name || 'Seated Player').slice(0, 80),
+    role: cleanRole(message.role, 'protagonist'),
+    text: String(message.text || '').slice(0, 1000),
+    createdAt: message.createdAt || now,
+  })).filter(message => message.text.trim()).slice(-MAX_ROOM_MESSAGES);
+  table.roomMsgSeq = Math.max(table.roomMsgSeq, ...table.roomMessages.map(message => message.id), 0);
   return table;
 }
 
@@ -459,6 +492,113 @@ function tableFlowPayload(table, player = null) {
   };
 }
 
+function defaultRooms(now = new Date().toISOString()) {
+  return [
+    { id: 'main', name: 'Main Table', kind: 'main', members: ['all'], active: true, createdAt: now },
+    { id: 'safety', name: 'Safety', kind: 'safety', members: ['all'], active: true, createdAt: now },
+    { id: 'warden', name: 'Warden', kind: 'warden', members: [], active: true, createdAt: now },
+  ];
+}
+
+function cleanRoomId(value) {
+  return String(value || '').trim().toLowerCase().replace(/[^a-z0-9_-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 60);
+}
+
+function cleanRoomMembers(value) {
+  const raw = Array.isArray(value) ? value : [];
+  const members = raw.map(item => String(item || '').trim().slice(0, 80)).filter(Boolean);
+  return [...new Set(members.length ? members : ['all'])].slice(0, 30);
+}
+
+function playerCanSeeRoom(room, player) {
+  if (!room || room.active === false) return false;
+  if (player?.role === 'warden') return true;
+  if (room.kind === 'warden') return false;
+  return room.members.includes('all') || room.members.includes(player?.id);
+}
+
+function roomsPayload(table, player = null) {
+  normalizeTable(table);
+  const rooms = table.rooms.filter(room => playerCanSeeRoom(room, player));
+  const roomIds = new Set(rooms.map(room => room.id));
+  const messages = table.roomMessages.filter(message => roomIds.has(message.roomId));
+  return {
+    code: table.code,
+    rooms,
+    messages,
+    lastRoomMessageId: table.roomMsgSeq || 0,
+  };
+}
+
+function roomName(table, roomId) {
+  return table.rooms.find(room => room.id === roomId)?.name || 'Room';
+}
+
+function addRoom(table, input = {}, player = null) {
+  normalizeTable(table);
+  const name = String(input.name || input.title || '').trim().slice(0, 80);
+  if (!name) return null;
+  const kind = ['main', 'private', 'split', 'safety', 'warden'].includes(input.kind) ? input.kind : 'split';
+  const members = cleanRoomMembers(input.members || (input.target && input.target !== 'all' ? [input.target] : ['all']));
+  const now = new Date().toISOString();
+  const baseId = cleanRoomId(input.id || name) || `room-${Date.now().toString(36)}`;
+  let id = baseId;
+  let suffix = 2;
+  while (table.rooms.some(room => room.id === id)) id = `${baseId}-${suffix++}`.slice(0, 60);
+  table.roomSeq = Number(table.roomSeq || 0) + 1;
+  const room = {
+    id,
+    name,
+    kind,
+    members,
+    active: true,
+    createdAt: now,
+    createdBy: player?.id || null,
+    createdByName: player?.name || null,
+  };
+  table.rooms.push(room);
+  table.rooms = table.rooms.slice(-MAX_ROOMS);
+  table.updatedAt = now;
+  return room;
+}
+
+function updateRoom(table, roomId, input = {}, player = null) {
+  normalizeTable(table);
+  const room = table.rooms.find(item => item.id === roomId);
+  if (!room) return null;
+  if (input.name !== undefined) room.name = String(input.name || room.name).trim().slice(0, 80) || room.name;
+  if (input.kind !== undefined && ['main', 'private', 'split', 'safety', 'warden'].includes(input.kind)) room.kind = input.kind;
+  if (input.members !== undefined) room.members = cleanRoomMembers(input.members);
+  if (input.active !== undefined) room.active = !!input.active;
+  table.updatedAt = new Date().toISOString();
+  table.updatedBy = player?.id || null;
+  return room;
+}
+
+function addRoomMessage(table, input = {}, player = null) {
+  normalizeTable(table);
+  const roomId = cleanRoomId(input.roomId || 'main') || 'main';
+  const room = table.rooms.find(item => item.id === roomId);
+  if (!room || !playerCanSeeRoom(room, player)) return null;
+  const text = String(input.text || input.message || '').trim().slice(0, 1000);
+  if (!text) return null;
+  const now = new Date().toISOString();
+  table.roomMsgSeq = Number(table.roomMsgSeq || 0) + 1;
+  const message = {
+    id: table.roomMsgSeq,
+    roomId,
+    clientId: player?.id || String(input.clientId || '').slice(0, 80),
+    name: player?.name || String(input.name || 'Seated Player').slice(0, 80),
+    role: cleanRole(player?.role || input.role, 'protagonist'),
+    text,
+    createdAt: now,
+  };
+  table.roomMessages.push(message);
+  table.roomMessages = table.roomMessages.slice(-MAX_ROOM_MESSAGES);
+  table.updatedAt = now;
+  return message;
+}
+
 function targetName(table, target) {
   if (!target || target === 'all') return 'All players';
   return table.players?.[target]?.name || 'Selected player';
@@ -588,6 +728,9 @@ function activityText(type, player, detail = {}) {
   if (type === 'prompt.sent') return `${name} sent a table prompt.`;
   if (type === 'prompt.responded') return `${name} answered a table prompt.`;
   if (type === 'handout.sent') return `${name} sent a table handout.`;
+  if (type === 'room.created') return `${name} created a table room.`;
+  if (type === 'room.updated') return `${name} updated a table room.`;
+  if (type === 'room.message') return `${name} sent a room message.`;
   if (type === 'dice.roll') return `${name} rolled d${detail.sides || '?'}${detail.result ? `: ${detail.result}` : ''}.`;
   if (type === 'scene.change') return `${name} changed scene${detail.sceneTitle ? ` to ${detail.sceneTitle}` : ''}.`;
   if (type === 'safety.signal') return `${name} raised ${detail.tier || 'a safety signal'}.`;
@@ -851,6 +994,7 @@ function liveClientPayload(table, client, reason = 'sync') {
     messages,
     events,
     flow: tableFlowPayload(table, client.player || null),
+    rooms: roomsPayload(table, client.player || null),
     sentAt: new Date().toISOString(),
   };
 }
@@ -951,6 +1095,10 @@ async function handleApi(req, res, pathname) {
       promptSeq: 0,
       handouts: [],
       handoutSeq: 0,
+      rooms: defaultRooms(now),
+      roomSeq: 3,
+      roomMessages: [],
+      roomMsgSeq: 0,
       flow: {},
     };
     const player = upsertPlayer(table, {
@@ -1178,6 +1326,86 @@ async function handleApi(req, res, pathname) {
       writeTables(data);
       broadcastTable(tableCode, 'handout.sent', table);
       return send(res, 201, { ...tableFlowPayload(table, player), handout });
+    }
+  }
+
+  const roomMessageMatch = pathname.match(/^\/api\/tables\/([A-Z0-9]{4,10})\/rooms\/([^/]+)\/messages$/i);
+  if (roomMessageMatch) {
+    const tableCode = roomMessageMatch[1].toUpperCase();
+    const roomId = cleanRoomId(decodeURIComponent(roomMessageMatch[2]));
+    const data = readTables();
+    const table = data.tables[tableCode] && normalizeTable(data.tables[tableCode]);
+    if (!table) return send(res, 404, { error: 'Table not found' });
+    const body = req.method === 'GET' ? {} : await readBody(req);
+    const input = body.player || body;
+    const id = String(input.clientId || input.id || body.clientId || '').trim().slice(0, 80);
+    const player = id ? upsertPlayer(table, { ...input, clientId: id }, table.players[id]?.role || input.role || body.role || 'protagonist') : null;
+    const room = table.rooms.find(item => item.id === roomId);
+    if (!room) return send(res, 404, { error: 'Room not found' });
+    if (!playerCanSeeRoom(room, player)) return send(res, 403, { error: 'This room is private.' });
+
+    if (req.method === 'GET') return send(res, 200, roomsPayload(table, player));
+
+    if (req.method === 'POST') {
+      if (!player) return send(res, 400, { error: 'Player clientId is required' });
+      const message = addRoomMessage(table, { ...body, roomId }, player);
+      if (!message) return send(res, 400, { error: 'Room message text is required' });
+      addEvent(table, {
+        type: 'room.message',
+        text: `${player.name || 'Someone'} messaged ${roomName(table, roomId)}.`,
+        detail: { roomId, roomName: roomName(table, roomId), messageId: message.id },
+      }, player);
+      data.tables[tableCode] = table;
+      writeTables(data);
+      broadcastTable(tableCode, 'room.message', table);
+      return send(res, 201, { ...roomsPayload(table, player), message });
+    }
+  }
+
+  const roomMatch = pathname.match(/^\/api\/tables\/([A-Z0-9]{4,10})\/rooms(?:\/([^/]+))?$/i);
+  if (roomMatch) {
+    const tableCode = roomMatch[1].toUpperCase();
+    const roomId = roomMatch[2] ? cleanRoomId(decodeURIComponent(roomMatch[2])) : null;
+    const data = readTables();
+    const table = data.tables[tableCode] && normalizeTable(data.tables[tableCode]);
+    if (!table) return send(res, 404, { error: 'Table not found' });
+    const url = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
+    const queryClientId = String(url.searchParams.get('clientId') || '').trim().slice(0, 80);
+    const body = req.method === 'GET' ? {} : await readBody(req);
+    const input = body.player || body;
+    const id = String(input.clientId || input.id || body.clientId || queryClientId).trim().slice(0, 80);
+    const player = id ? upsertPlayer(table, { ...input, clientId: id }, table.players[id]?.role || input.role || body.role || 'protagonist') : null;
+
+    if (req.method === 'GET') return send(res, 200, roomsPayload(table, player));
+
+    if (!player || player.role !== 'warden') return send(res, 403, { error: 'Only the Warden can manage rooms.' });
+
+    if (!roomId && req.method === 'POST') {
+      const room = addRoom(table, body, player);
+      if (!room) return send(res, 400, { error: 'Room name is required' });
+      addEvent(table, {
+        type: 'room.created',
+        text: `${player.name || 'Warden'} created room: ${room.name}.`,
+        detail: { roomId: room.id, roomName: room.name, kind: room.kind },
+      }, player);
+      data.tables[tableCode] = table;
+      writeTables(data);
+      broadcastTable(tableCode, 'room.created', table);
+      return send(res, 201, { ...roomsPayload(table, player), room });
+    }
+
+    if (roomId && req.method === 'PATCH') {
+      const room = updateRoom(table, roomId, body, player);
+      if (!room) return send(res, 404, { error: 'Room not found' });
+      addEvent(table, {
+        type: 'room.updated',
+        text: `${player.name || 'Warden'} updated room: ${room.name}.`,
+        detail: { roomId: room.id, roomName: room.name, kind: room.kind },
+      }, player);
+      data.tables[tableCode] = table;
+      writeTables(data);
+      broadcastTable(tableCode, 'room.updated', table);
+      return send(res, 200, { ...roomsPayload(table, player), room });
     }
   }
 

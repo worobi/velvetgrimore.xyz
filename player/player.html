@@ -401,6 +401,13 @@ textarea.npc-response:focus { border-color: var(--border-hot); }
         <div id="playerHandouts" style="display:grid;gap:8px;max-height:220px;overflow:auto;background:rgba(0,0,0,0.18);border:1px solid var(--border);border-radius:6px;padding:10px;"></div>
       </div>
     </div>
+    <div style="font-family:'Cinzel',serif;color:var(--gold);font-size:12px;letter-spacing:1px;text-transform:uppercase;margin-bottom:8px;">Rooms</div>
+    <select id="playerActiveRoom" onchange="renderPlayerRooms()" style="margin-bottom:8px;"></select>
+    <div id="playerRoomMessages" style="display:grid;gap:8px;max-height:220px;overflow:auto;background:rgba(0,0,0,0.18);border:1px solid var(--border);border-radius:6px;padding:10px;margin-bottom:8px;"></div>
+    <div class="remote-join-row" style="margin-bottom:12px;">
+      <input type="text" id="playerRoomMessageInput" placeholder="Message selected room..." onkeydown="if(event.key==='Enter') playerSendRoomMessage()">
+      <button class="btn btn-purple" onclick="playerSendRoomMessage()">Send</button>
+    </div>
     <div style="font-family:'Cinzel',serif;color:var(--gold);font-size:12px;letter-spacing:1px;text-transform:uppercase;margin-bottom:8px;">Activity Feed</div>
     <div id="playerEventRail" style="display:grid;gap:8px;max-height:220px;overflow:auto;background:rgba(0,0,0,0.18);border:1px solid var(--border);border-radius:6px;padding:10px;margin-bottom:12px;"></div>
     <div style="display:flex;justify-content:space-between;gap:10px;align-items:center;margin-bottom:10px;">
@@ -676,14 +683,17 @@ function initRemoteSync() {
     onEvents: renderPlayerEvents,
     onCheckpoints: () => renderPlayerLiveSummary(VGSync.status()),
     onFlow: renderPlayerFlow,
+    onRooms: renderPlayerRooms,
     onError: err => updatePlayerSyncStatus({ ...VGSync.status(), error: err.message }),
   });
   updatePlayerSyncStatus(VGSync.status());
   renderPlayerChat(VGSync.status().messages || []);
   renderPlayerEvents(VGSync.status().events || []);
   renderPlayerFlow(VGSync.status());
+  renderPlayerRooms(VGSync.status());
   if (VGSync.status().enabled) VGSync.fetchCheckpoints().catch(() => null);
   if (VGSync.status().enabled) VGSync.fetchFlow().catch(() => null);
+  if (VGSync.status().enabled) VGSync.fetchRooms().catch(() => null);
 }
 
 function updatePlayerSyncStatus(status = (window.VGSync ? VGSync.status() : null)) {
@@ -759,6 +769,7 @@ function renderPlayerLobby(table = (window.VGSync ? VGSync.status().table : null
     </div>
   `).join('');
   renderPlayerFlow(window.VGSync ? VGSync.status() : null);
+  renderPlayerRooms(window.VGSync ? VGSync.status() : null);
 }
 
 function renderPlayerFlow(state = (window.VGSync ? VGSync.status() : null)) {
@@ -799,6 +810,37 @@ function renderPlayerFlow(state = (window.VGSync ? VGSync.status() : null)) {
     `).join('') : `<div style="font-size:12px;color:var(--text-muted);font-style:italic;">No handouts revealed yet.</div>`;
   }
   renderPlayerLiveSummary(window.VGSync ? VGSync.status() : null);
+}
+
+function renderPlayerRooms(state = (window.VGSync ? VGSync.status() : null)) {
+  const rooms = state?.rooms || [];
+  const messages = state?.roomMessages || state?.messages || [];
+  const select = document.getElementById('playerActiveRoom');
+  const list = document.getElementById('playerRoomMessages');
+  if (select) {
+    const current = select.value || 'main';
+    select.innerHTML = rooms.length
+      ? rooms.map(room => `<option value="${escapeHtml(room.id)}"${current === room.id ? ' selected' : ''}>${escapeHtml(room.name)} · ${escapeHtml(room.kind)}</option>`).join('')
+      : `<option value="main">Main Table</option>`;
+    if (![...select.options].some(option => option.value === current) && select.options.length) select.selectedIndex = 0;
+  }
+  if (list) {
+    const roomId = select?.value || rooms[0]?.id || 'main';
+    const visible = (messages || []).filter(message => message.roomId === roomId).slice(-40);
+    list.innerHTML = visible.length ? visible.map(message => {
+      const time = message.createdAt ? new Date(message.createdAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }) : '';
+      return `
+        <div style="border-bottom:1px solid rgba(255,255,255,0.04);padding-bottom:7px;">
+          <div style="display:flex;justify-content:space-between;gap:8px;font-size:12px;color:var(--text-muted);">
+            <span><strong style="color:var(--text);">${escapeHtml(message.name || 'Seated Player')}</strong> · ${escapeHtml(message.role || 'protagonist')}</span>
+            <span>${escapeHtml(time)}</span>
+          </div>
+          <div style="font-size:14px;color:var(--text-dim);line-height:1.45;margin-top:3px;">${escapeHtml(message.text || '')}</div>
+        </div>
+      `;
+    }).join('') : `<div style="font-size:12px;color:var(--text-muted);font-style:italic;">No messages in this room yet.</div>`;
+    list.scrollTop = list.scrollHeight;
+  }
 }
 
 function playerSnapshotSummary() {
@@ -894,6 +936,9 @@ function playerEventLabel(event) {
     'prompt.sent': 'Prompt',
     'prompt.responded': 'Response',
     'handout.sent': 'Handout',
+    'room.created': 'Room',
+    'room.updated': 'Room',
+    'room.message': 'Room Chat',
     'dice.roll': 'Roll',
     'scene.change': 'Scene',
     'safety.signal': 'Safety',
@@ -981,6 +1026,7 @@ async function joinRemoteTableFromPlayer() {
     await VGSync.fetchEvents(true);
     await VGSync.fetchCheckpoints();
     await VGSync.fetchFlow();
+    await VGSync.fetchRooms();
     VGEngine.resumeSession();
     refreshView();
   } catch (err) {
@@ -997,6 +1043,7 @@ async function playerRefreshLobby() {
     await VGSync.fetchEvents(true);
     await VGSync.fetchCheckpoints();
     await VGSync.fetchFlow();
+    await VGSync.fetchRooms();
     renderPlayerLobby(table);
     updatePlayerSyncStatus(VGSync.status());
   } catch (err) {
@@ -1045,6 +1092,22 @@ async function answerPlayerPrompt(promptId) {
   } catch (err) {
     updatePlayerSyncStatus({ ...VGSync.status(), error: err.message });
     showToast(`Prompt failed: ${err.message}`);
+  }
+}
+
+async function playerSendRoomMessage() {
+  if (!window.VGSync) return;
+  const input = document.getElementById('playerRoomMessageInput');
+  const text = input?.value || '';
+  const roomId = document.getElementById('playerActiveRoom')?.value || 'main';
+  if (!text.trim()) return;
+  try {
+    await VGSync.sendRoomMessage(roomId, text);
+    if (input) input.value = '';
+    renderPlayerRooms(VGSync.status());
+  } catch (err) {
+    updatePlayerSyncStatus({ ...VGSync.status(), error: err.message });
+    showToast(`Room message failed: ${err.message}`);
   }
 }
 

@@ -769,6 +769,28 @@ hr.divider { border: none; border-top: 1px solid var(--border); margin: 24px 0; 
           <button class="btn btn-gold btn-sm" onclick="sendSyncPrompt()">Send Prompt</button>
         </div>
         <div id="syncPromptList" style="display:grid;gap:8px;max-height:190px;overflow:auto;background:rgba(0,0,0,0.18);border:1px solid var(--border);border-radius:6px;padding:10px;margin-bottom:10px;"></div>
+        <div style="border-top:1px solid var(--border);padding-top:10px;margin-bottom:10px;">
+          <div style="font-family:'Cinzel',serif;color:var(--gold);font-size:12px;letter-spacing:1px;text-transform:uppercase;margin-bottom:8px;">Rooms</div>
+          <div style="display:grid;grid-template-columns:minmax(0,1fr) 110px;gap:8px;margin-bottom:8px;">
+            <input type="text" id="syncRoomName" placeholder="Room name...">
+            <select id="syncRoomKind">
+              <option value="split">Split</option>
+              <option value="private">Private</option>
+              <option value="safety">Safety</option>
+            </select>
+          </div>
+          <select id="syncRoomMembers" multiple size="3" style="min-height:82px;margin-bottom:8px;"></select>
+          <div class="flex gap-8" style="flex-wrap:wrap;margin-bottom:8px;">
+            <button class="btn btn-gold btn-sm" onclick="createSyncRoom()">Create Room</button>
+            <button class="btn btn-ghost btn-sm" onclick="refreshSyncRooms()">Refresh Rooms</button>
+          </div>
+          <select id="syncActiveRoom" onchange="renderSyncRooms()" style="margin-bottom:8px;"></select>
+          <div id="syncRoomMessages" style="display:grid;gap:8px;max-height:180px;overflow:auto;background:rgba(0,0,0,0.18);border:1px solid var(--border);border-radius:6px;padding:10px;margin-bottom:8px;"></div>
+          <div class="flex gap-8">
+            <input type="text" id="syncRoomMessageInput" placeholder="Message selected room..." onkeydown="if(event.key==='Enter') sendSyncRoomMessage()">
+            <button class="btn btn-ghost btn-sm" onclick="sendSyncRoomMessage()" style="white-space:nowrap;">Send</button>
+          </div>
+        </div>
         <div style="display:grid;gap:8px;">
           <select id="syncHandoutTarget"></select>
           <input type="text" id="syncHandoutTitle" placeholder="Handout title...">
@@ -1303,6 +1325,7 @@ function initRemoteSync() {
     onEvents: renderSyncEvents,
     onCheckpoints: renderSyncCheckpoints,
     onFlow: renderSyncFlow,
+    onRooms: renderSyncRooms,
     onError: err => updateSyncStatus({ ...VGSync.status(), error: err.message }),
   });
   updateSyncStatus(VGSync.status());
@@ -1311,6 +1334,7 @@ function initRemoteSync() {
   renderSyncEvents(cfg.events || []);
   renderSyncCheckpoints(cfg.checkpoints || []);
   renderSyncFlow(cfg.flow || null);
+  renderSyncRooms(cfg.rooms || null);
 }
 
 function updateSyncStatus(status = (window.VGSync ? VGSync.status() : null)) {
@@ -1372,6 +1396,7 @@ function renderSyncFlow(state = (window.VGSync ? VGSync.status() : null)) {
   if (focusTarget) focusTarget.innerHTML = syncTargetOptions(flow.focusClientId || '');
   if (promptTarget) promptTarget.innerHTML = syncTargetOptions(promptTarget.value || 'all');
   if (handoutTarget) handoutTarget.innerHTML = syncTargetOptions(handoutTarget.value || 'all');
+  renderSyncRoomMemberOptions();
   if (summary) {
     summary.textContent = flow.focusClientId
       ? `Spotlight: ${flow.focusName || 'Selected player'}${flow.focusNote ? ` - ${flow.focusNote}` : ''}`
@@ -1403,6 +1428,51 @@ function renderSyncFlow(state = (window.VGSync ? VGSync.status() : null)) {
         <div style="font-size:13px;color:var(--text-dim);line-height:1.45;margin-top:3px;">${escHtml(handout.text || '')}</div>
       </div>
     `).join('') : `<div style="font-size:12px;color:var(--text-muted);font-style:italic;">No handouts sent yet.</div>`;
+  }
+}
+
+function renderSyncRoomMemberOptions() {
+  const select = document.getElementById('syncRoomMembers');
+  if (!select) return;
+  const selected = new Set([...select.selectedOptions].map(option => option.value));
+  const players = window.VGSync ? (VGSync.status().players || VGSync.status().table?.players || []) : [];
+  const options = [`<option value="all"${selected.has('all') || !selected.size ? ' selected' : ''}>All players</option>`];
+  players.filter(player => player.role !== 'warden').forEach(player => {
+    options.push(`<option value="${escHtml(player.id)}"${selected.has(player.id) ? ' selected' : ''}>${escHtml(player.name || 'Seated Player')}</option>`);
+  });
+  select.innerHTML = options.join('');
+}
+
+function renderSyncRooms(state = (window.VGSync ? VGSync.status() : null)) {
+  const status = window.VGSync ? VGSync.status() : null;
+  const rooms = state?.rooms || status?.rooms || [];
+  const messages = state?.messages || status?.roomMessages || [];
+  const activeSelect = document.getElementById('syncActiveRoom');
+  const messageList = document.getElementById('syncRoomMessages');
+  renderSyncRoomMemberOptions();
+  if (activeSelect) {
+    const current = activeSelect.value || 'main';
+    activeSelect.innerHTML = rooms.length
+      ? rooms.map(room => `<option value="${escHtml(room.id)}"${current === room.id ? ' selected' : ''}>${escHtml(room.name)} · ${escHtml(room.kind)}</option>`).join('')
+      : `<option value="main">Main Table</option>`;
+    if (![...activeSelect.options].some(option => option.value === current) && activeSelect.options.length) activeSelect.selectedIndex = 0;
+  }
+  if (messageList) {
+    const roomId = activeSelect?.value || rooms[0]?.id || 'main';
+    const visible = (messages || []).filter(message => message.roomId === roomId).slice(-40);
+    messageList.innerHTML = visible.length ? visible.map(message => {
+      const time = message.createdAt ? new Date(message.createdAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }) : '';
+      return `
+        <div style="border-bottom:1px solid rgba(255,255,255,0.04);padding-bottom:7px;">
+          <div style="display:flex;justify-content:space-between;gap:8px;font-size:12px;color:var(--text-muted);">
+            <span><strong style="color:var(--text);">${escHtml(message.name || 'Seated Player')}</strong> · ${escHtml(message.role || 'protagonist')}</span>
+            <span>${escHtml(time)}</span>
+          </div>
+          <div style="font-size:13px;color:var(--text-dim);line-height:1.45;margin-top:3px;">${escHtml(message.text || '')}</div>
+        </div>
+      `;
+    }).join('') : `<div style="font-size:12px;color:var(--text-muted);font-style:italic;">No messages in this room yet.</div>`;
+    messageList.scrollTop = messageList.scrollHeight;
   }
 }
 
@@ -1541,6 +1611,9 @@ function eventLabel(event) {
     'prompt.sent': 'Prompt',
     'prompt.responded': 'Response',
     'handout.sent': 'Handout',
+    'room.created': 'Room',
+    'room.updated': 'Room',
+    'room.message': 'Room Chat',
     'dice.roll': 'Roll',
     'scene.change': 'Scene',
     'safety.signal': 'Safety',
@@ -1585,6 +1658,9 @@ function timelineCategory(event) {
     'prompt.sent': 'table',
     'prompt.responded': 'table',
     'handout.sent': 'table',
+    'room.created': 'table',
+    'room.updated': 'table',
+    'room.message': 'chat',
     'dice.roll': 'roll',
     'scene.change': 'scene',
     'safety.signal': 'safety',
@@ -1759,6 +1835,7 @@ async function createRemoteTable() {
     await VGSync.fetchEvents(true);
     await VGSync.fetchCheckpoints();
     await VGSync.fetchFlow();
+    await VGSync.fetchRooms();
     toast(`Remote table created: ${result.table.code}`, 'success');
     updateSyncStatus(VGSync.status());
   } catch (err) {
@@ -1781,6 +1858,7 @@ async function joinRemoteTable() {
     await VGSync.fetchEvents(true);
     await VGSync.fetchCheckpoints();
     await VGSync.fetchFlow();
+    await VGSync.fetchRooms();
     toast(`Joined remote table: ${result.table.code}`, 'success');
     updateSyncStatus(VGSync.status());
   } catch (err) {
@@ -1797,6 +1875,7 @@ async function refreshLobby() {
     await VGSync.fetchEvents(true);
     await VGSync.fetchCheckpoints();
     await VGSync.fetchFlow();
+    await VGSync.fetchRooms();
     renderSyncLobby(table);
     updateSyncStatus(VGSync.status());
   } catch (err) {
@@ -1909,6 +1988,51 @@ async function sendSyncHandout() {
     toast('Handout sent.', 'success');
   } catch (err) {
     toast(`Handout failed: ${err.message}`, 'error');
+  }
+}
+
+async function refreshSyncRooms() {
+  if (!window.VGSync) return;
+  try {
+    await VGSync.fetchRooms();
+    renderSyncRooms(VGSync.status());
+  } catch (err) {
+    toast(`Room refresh failed: ${err.message}`, 'error');
+  }
+}
+
+async function createSyncRoom() {
+  if (!window.VGSync) return;
+  const nameInput = document.getElementById('syncRoomName');
+  const name = nameInput?.value || '';
+  if (!name.trim()) return;
+  const selected = [...(document.getElementById('syncRoomMembers')?.selectedOptions || [])].map(option => option.value);
+  const members = selected.includes('all') || !selected.length ? ['all'] : selected;
+  try {
+    await VGSync.createRoom(name, {
+      kind: document.getElementById('syncRoomKind')?.value || 'split',
+      members,
+    });
+    if (nameInput) nameInput.value = '';
+    renderSyncRooms(VGSync.status());
+    toast('Room created.', 'success');
+  } catch (err) {
+    toast(`Room failed: ${err.message}`, 'error');
+  }
+}
+
+async function sendSyncRoomMessage() {
+  if (!window.VGSync) return;
+  const input = document.getElementById('syncRoomMessageInput');
+  const text = input?.value || '';
+  const roomId = document.getElementById('syncActiveRoom')?.value || 'main';
+  if (!text.trim()) return;
+  try {
+    await VGSync.sendRoomMessage(roomId, text);
+    if (input) input.value = '';
+    renderSyncRooms(VGSync.status());
+  } catch (err) {
+    toast(`Room message failed: ${err.message}`, 'error');
   }
 }
 
@@ -2071,6 +2195,7 @@ function mountLiveTablePanel() {
   renderSyncChat(window.VGSync ? VGSync.status().messages : []);
   renderSyncCheckpoints(window.VGSync ? VGSync.status().checkpoints : []);
   renderSyncFlow(window.VGSync ? VGSync.status() : null);
+  renderSyncRooms(window.VGSync ? VGSync.status() : null);
 }
 
 function updateLiveSummary(status = (window.VGSync ? VGSync.status() : null)) {

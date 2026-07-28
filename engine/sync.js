@@ -32,6 +32,7 @@ const VGSync = (() => {
   let events = [];
   let checkpoints = [];
   let flowState = { flow: {}, prompts: [], handouts: [] };
+  let roomState = { rooms: [], messages: [], lastRoomMessageId: 0 };
   let liveStream = null;
   let liveState = 'off';
 
@@ -194,6 +195,14 @@ const VGSync = (() => {
       };
       callbacks.onFlow?.(flowState);
     }
+    if (payload.rooms) {
+      roomState = {
+        rooms: payload.rooms.rooms || [],
+        messages: payload.rooms.messages || [],
+        lastRoomMessageId: payload.rooms.lastRoomMessageId || 0,
+      };
+      callbacks.onRooms?.(roomState);
+    }
     callbacks.onLive?.({ state: liveState, reason: payload.reason || 'sync', sentAt: payload.sentAt || null });
     callbacks.onStatus?.(status());
   }
@@ -265,6 +274,7 @@ const VGSync = (() => {
     lastEventId = 0;
     checkpoints = [];
     flowState = { flow: {}, prompts: [], handouts: [] };
+    roomState = { rooms: [], messages: [], lastRoomMessageId: 0 };
     const next = saveConfig({ ...config, enabled: true, code: table.code, lastRev: table.rev, role: 'warden', ready: true });
     lastFingerprint = fingerprint(local);
     start(callbacks);
@@ -291,6 +301,7 @@ const VGSync = (() => {
     lastEventId = 0;
     checkpoints = [];
     flowState = { flow: {}, prompts: [], handouts: [] };
+    roomState = { rooms: [], messages: [], lastRoomMessageId: 0 };
     const next = saveConfig({
       ...config,
       enabled: true,
@@ -602,6 +613,67 @@ const VGSync = (() => {
     return applyFlowPayload(payload);
   }
 
+  function applyRoomsPayload(payload = {}) {
+    roomState = {
+      rooms: payload.rooms || [],
+      messages: payload.messages || [],
+      lastRoomMessageId: payload.lastRoomMessageId || 0,
+    };
+    callbacks.onRooms?.(roomState);
+    callbacks.onStatus?.(status());
+    return roomState;
+  }
+
+  async function fetchRooms() {
+    const config = getConfig();
+    if (!config.enabled || !config.code) return roomState;
+    const payload = await request(`/api/tables/${config.code}/rooms?clientId=${encodeURIComponent(config.clientId)}`);
+    return applyRoomsPayload(payload);
+  }
+
+  async function createRoom(name, options = {}) {
+    const config = getConfig();
+    if (!config.enabled || !config.code) throw new Error('Join or create a table first.');
+    if (!canWriteSharedState()) throw new Error('Only the Warden can create rooms.');
+    const payload = await request(`/api/tables/${config.code}/rooms`, {
+      method: 'POST',
+      body: JSON.stringify({
+        name,
+        kind: options.kind || 'split',
+        members: options.members || ['all'],
+        player: playerPayload(),
+      }),
+    });
+    return applyRoomsPayload(payload);
+  }
+
+  async function updateRoom(roomId, updates = {}) {
+    const config = getConfig();
+    if (!config.enabled || !config.code) throw new Error('Join or create a table first.');
+    if (!canWriteSharedState()) throw new Error('Only the Warden can update rooms.');
+    const payload = await request(`/api/tables/${config.code}/rooms/${encodeURIComponent(roomId)}`, {
+      method: 'PATCH',
+      body: JSON.stringify({
+        ...updates,
+        player: playerPayload(),
+      }),
+    });
+    return applyRoomsPayload(payload);
+  }
+
+  async function sendRoomMessage(roomId, text) {
+    const config = getConfig();
+    if (!config.enabled || !config.code) throw new Error('Join or create a table first.');
+    const payload = await request(`/api/tables/${config.code}/rooms/${encodeURIComponent(roomId || 'main')}/messages`, {
+      method: 'POST',
+      body: JSON.stringify({
+        text,
+        player: playerPayload(),
+      }),
+    });
+    return applyRoomsPayload(payload);
+  }
+
   async function updatePlayer(updates = {}) {
     const config = getConfig();
     if (!config.code) throw new Error('Join or create a table first.');
@@ -683,6 +755,7 @@ const VGSync = (() => {
         await fetchEvents();
         if (!checkpoints.length && canWriteSharedState()) await fetchCheckpoints();
         await fetchFlow();
+        await fetchRooms();
       }
       await push();
     } catch (err) {
@@ -738,6 +811,9 @@ const VGSync = (() => {
       flow: flowState.flow || {},
       prompts: flowState.prompts || [],
       handouts: flowState.handouts || [],
+      rooms: roomState.rooms || [],
+      roomMessages: roomState.messages || [],
+      lastRoomMessageId: roomState.lastRoomMessageId || 0,
       table: lastTable,
       players: lastTable?.players || [],
     };
@@ -773,6 +849,10 @@ const VGSync = (() => {
     respondPrompt,
     closePrompt,
     sendHandout,
+    fetchRooms,
+    createRoom,
+    updateRoom,
+    sendRoomMessage,
     updatePlayer,
     setReady,
     pull,
