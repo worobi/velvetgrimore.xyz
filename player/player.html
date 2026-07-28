@@ -601,7 +601,7 @@ function updatePlayerSyncStatus(status = (window.VGSync ? VGSync.status() : null
   const el = document.getElementById('playerSyncStatus');
   if (!el || !status) return;
   el.textContent = status.enabled && status.code
-    ? `Connected to table ${status.code} · ${status.role || 'protagonist'} · ${status.ready ? 'ready' : 'not ready'} · revision ${status.lastRev || 0}${status.error ? ` · ${status.error}` : ''}`
+    ? `Connected to table ${status.code} · ${status.role || 'protagonist'} · ${status.ready ? 'ready' : 'not ready'} · ${status.canWriteSharedState ? 'state control on' : 'view only'} · revision ${status.lastRev || 0}${status.error ? ` · ${status.error}` : ''}`
     : (status.error ? `Sync error: ${status.error}` : '');
   renderPlayerLobby(status.table);
 }
@@ -616,8 +616,8 @@ function renderPlayerLobby(table = (window.VGSync ? VGSync.status().table : null
   }
   el.innerHTML = players.map(player => `
     <div style="display:flex;justify-content:space-between;gap:12px;align-items:center;background:rgba(255,255,255,0.025);border:1px solid var(--border);border-radius:6px;padding:8px 10px;">
-      <div><strong style="color:var(--text);">${escapeHtml(player.name || 'Seated Player')}</strong><span style="color:var(--text-muted);font-size:12px;"> · ${escapeHtml(player.role || 'protagonist')}</span></div>
-      <div style="font-size:12px;color:${player.ready ? 'var(--gold)' : 'var(--text-muted)'};">${player.ready ? 'ready' : 'not ready'}</div>
+      <div><strong style="color:var(--text);">${escapeHtml(player.name || 'Seated Player')}</strong><span style="color:var(--text-muted);font-size:12px;"> · ${escapeHtml(player.role || 'protagonist')}</span><span style="color:${player.online ? '#9edc9e' : 'var(--text-muted)'};font-size:12px;"> · ${player.online ? 'online' : `idle ${player.idleSeconds || 0}s`}</span></div>
+      <div style="font-size:12px;color:${player.ready ? 'var(--gold)' : 'var(--text-muted)'};">${player.ready ? 'ready' : 'not ready'}${player.role === 'warden' ? ' · controls state' : ''}</div>
     </div>
   `).join('');
 }

@@ -25,6 +25,7 @@ const VGSync = (() => {
   let lastFingerprint = '';
   let busy = false;
   let lastTable = null;
+  let lastPresenceAt = 0;
 
   function uid() {
     return Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
@@ -95,6 +96,11 @@ const VGSync = (() => {
       role: syncRoleToTableRole(overrides.role || config.role),
       ready: overrides.ready === undefined ? !!config.ready : !!overrides.ready,
     };
+  }
+
+  function canWriteSharedState() {
+    const config = getConfig();
+    return syncRoleToTableRole(config.role) === 'warden';
   }
 
   function fingerprint(snap = snapshot()) {
@@ -185,6 +191,21 @@ const VGSync = (() => {
     return table;
   }
 
+  async function heartbeat(force = false) {
+    const config = getConfig();
+    if (!config.enabled || !config.code) return null;
+    if (!force && Date.now() - lastPresenceAt < 5000) return lastTable;
+    lastPresenceAt = Date.now();
+    const table = await request(`/api/tables/${config.code}/presence`, {
+      method: 'POST',
+      body: JSON.stringify({ player: playerPayload() }),
+    });
+    lastTable = table;
+    callbacks.onLobby?.(table);
+    callbacks.onStatus?.(status());
+    return table;
+  }
+
   async function updatePlayer(updates = {}) {
     const config = getConfig();
     if (!config.code) throw new Error('Join or create a table first.');
@@ -231,6 +252,7 @@ const VGSync = (() => {
   async function push() {
     const config = getConfig();
     if (!config.enabled || !config.code) return null;
+    if (!canWriteSharedState()) return null;
     const local = snapshot();
     const current = fingerprint(local);
     if (current === lastFingerprint) return null;
@@ -255,6 +277,7 @@ const VGSync = (() => {
     busy = true;
     try {
       await pull();
+      await heartbeat();
       await push();
     } catch (err) {
       callbacks.onError?.(err);
@@ -291,6 +314,8 @@ const VGSync = (() => {
       playerName: config.playerName || defaultPlayerName(),
       role: syncRoleToTableRole(config.role || localStorage.getItem('vg_role')),
       ready: !!config.ready,
+      canWriteSharedState: canWriteSharedState(),
+      permissions: lastTable?.permissions || null,
       table: lastTable,
       players: lastTable?.players || [],
     };
@@ -309,6 +334,7 @@ const VGSync = (() => {
     createTable,
     joinTable,
     fetchLobby,
+    heartbeat,
     updatePlayer,
     setReady,
     pull,

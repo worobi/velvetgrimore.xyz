@@ -11,6 +11,7 @@ const DATA_DIR = process.env.DATA_DIR || (fs.existsSync('/data') ? '/data' : pat
 const TABLES_FILE = path.join(DATA_DIR, 'tables.json');
 const PORT = Number(process.env.PORT || 8765);
 const PLAYER_ROLES = new Set(['warden', 'protagonist', 'boss', 'spectator']);
+const PRESENCE_ONLINE_MS = 20_000;
 
 const MIME = {
   '.html': 'text/html; charset=utf-8',
@@ -59,8 +60,9 @@ function cleanRole(role, fallback = 'protagonist') {
   return PLAYER_ROLES.has(fallback) ? fallback : 'protagonist';
 }
 
-function cleanPlayer(input = {}, fallbackRole = 'protagonist') {
+function cleanPlayer(input = {}, fallbackRole = 'protagonist', options = {}) {
   const now = new Date().toISOString();
+  const touch = options.touch !== false;
   const id = String(input.clientId || input.id || '').trim().slice(0, 80);
   if (!id) return null;
   return {
@@ -69,7 +71,7 @@ function cleanPlayer(input = {}, fallbackRole = 'protagonist') {
     role: cleanRole(input.role, fallbackRole),
     ready: !!input.ready,
     joinedAt: input.joinedAt || now,
-    lastSeenAt: now,
+    lastSeenAt: touch ? now : (input.lastSeenAt || input.joinedAt || now),
   };
 }
 
@@ -82,7 +84,7 @@ function normalizeTable(table) {
   table.snapshot = table.snapshot || {};
   table.rev = Number(table.rev || 1);
   Object.keys(table.players).forEach(id => {
-    const normalized = cleanPlayer({ id, ...table.players[id] }, table.players[id]?.role || 'protagonist');
+    const normalized = cleanPlayer({ id, ...table.players[id] }, table.players[id]?.role || 'protagonist', { touch: false });
     if (normalized) table.players[id] = normalized;
     else delete table.players[id];
   });
@@ -104,6 +106,31 @@ function upsertPlayer(table, playerInput, fallbackRole = 'protagonist') {
   table.players[player.id] = player;
   table.updatedAt = new Date().toISOString();
   return player;
+}
+
+function playerPresence(player) {
+  const lastSeen = Date.parse(player.lastSeenAt || player.joinedAt || 0);
+  const idleMs = Number.isFinite(lastSeen) ? Math.max(0, Date.now() - lastSeen) : Number.MAX_SAFE_INTEGER;
+  return {
+    online: idleMs <= PRESENCE_ONLINE_MS,
+    idleSeconds: Math.floor(idleMs / 1000),
+  };
+}
+
+function canWriteSnapshot(table, clientId) {
+  const player = table.players?.[clientId];
+  return !!player && player.role === 'warden';
+}
+
+function currentWarden(table) {
+  return Object.values(table.players || {}).find(player => player.role === 'warden') || null;
+}
+
+function canUseRole(table, clientId, role) {
+  const nextRole = cleanRole(role);
+  if (nextRole !== 'warden') return true;
+  const warden = currentWarden(table);
+  return !warden || warden.id === clientId;
 }
 
 function send(res, status, body, headers = {}) {
@@ -136,6 +163,7 @@ function readBody(req) {
 
 function tablePayload(table) {
   normalizeTable(table);
+  const writer = currentWarden(table);
   return {
     code: table.code,
     name: table.name,
@@ -145,7 +173,12 @@ function tablePayload(table) {
     players: Object.values(table.players || {}).sort((a, b) => {
       const rank = { warden: 0, protagonist: 1, boss: 2, spectator: 3 };
       return (rank[a.role] ?? 9) - (rank[b.role] ?? 9) || String(a.name).localeCompare(String(b.name));
-    }),
+    }).map(player => ({ ...player, ...playerPresence(player) })),
+    permissions: {
+      snapshotWriterRole: 'warden',
+      snapshotWriterId: writer?.id || null,
+      snapshotWriterName: writer?.name || null,
+    },
     updatedAt: table.updatedAt,
     updatedBy: table.updatedBy || null,
   };
@@ -196,7 +229,12 @@ async function handleApi(req, res, pathname) {
     if (req.method === 'POST' || req.method === 'PATCH') {
       const body = await readBody(req);
       const id = playerMatch[2] ? decodeURIComponent(playerMatch[2]) : body.clientId;
-      const player = upsertPlayer(table, { ...body, clientId: id || body.clientId }, body.role || 'protagonist');
+      if (!id) return send(res, 400, { error: 'Player clientId is required' });
+      if (!canUseRole(table, id, body.role || table.players[id]?.role || 'protagonist')) {
+        return send(res, 403, { error: 'Only the current Warden can keep the Warden seat.' });
+      }
+      const fallbackRole = table.players[id]?.role || body.role || 'protagonist';
+      const player = upsertPlayer(table, { ...body, clientId: id || body.clientId }, fallbackRole);
       if (!player) return send(res, 400, { error: 'Player clientId is required' });
       table.rev += 1;
       table.updatedBy = player.id;
@@ -204,6 +242,28 @@ async function handleApi(req, res, pathname) {
       writeTables(data);
       return send(res, 200, tablePayload(table));
     }
+  }
+
+  const presenceMatch = pathname.match(/^\/api\/tables\/([A-Z0-9]{4,10})\/presence$/i);
+  if (presenceMatch) {
+    const tableCode = presenceMatch[1].toUpperCase();
+    const data = readTables();
+    const table = data.tables[tableCode] && normalizeTable(data.tables[tableCode]);
+    if (!table) return send(res, 404, { error: 'Table not found' });
+    if (req.method !== 'POST' && req.method !== 'PATCH') return send(res, 404, { error: 'Not found' });
+    const body = await readBody(req);
+    const input = body.player || body;
+    const id = String(input.clientId || input.id || '').trim().slice(0, 80);
+    if (!id) return send(res, 400, { error: 'Player clientId is required' });
+    if (!canUseRole(table, id, input.role || table.players[id]?.role || 'protagonist')) {
+      return send(res, 403, { error: 'Only the current Warden can keep the Warden seat.' });
+    }
+    const fallbackRole = table.players[id]?.role || input.role || body.role || 'protagonist';
+    const player = upsertPlayer(table, input, fallbackRole);
+    if (!player) return send(res, 400, { error: 'Player clientId is required' });
+    data.tables[tableCode] = table;
+    writeTables(data);
+    return send(res, 200, tablePayload(table));
   }
 
   const match = pathname.match(/^\/api\/tables\/([A-Z0-9]{4,10})$/i);
@@ -217,7 +277,20 @@ async function handleApi(req, res, pathname) {
 
     if (req.method === 'PUT') {
       const body = await readBody(req);
-      upsertPlayer(table, body.player || { clientId: body.clientId, role: body.role }, body.role || 'protagonist');
+      const input = body.player || { clientId: body.clientId, role: body.role };
+      const id = String(input.clientId || input.id || '').trim().slice(0, 80);
+      if (!id) return send(res, 400, { error: 'Player clientId is required' });
+      if (!canUseRole(table, id, input.role || table.players[id]?.role || 'protagonist')) {
+        return send(res, 403, { error: 'Only the current Warden can sync shared table state.' });
+      }
+      const fallbackRole = table.players[id]?.role || input.role || body.role || 'protagonist';
+      const player = upsertPlayer(table, input, fallbackRole);
+      if (!player) return send(res, 400, { error: 'Player clientId is required' });
+      if (!canWriteSnapshot(table, player.id)) {
+        data.tables[tableCode] = table;
+        writeTables(data);
+        return send(res, 403, { error: 'Only the Warden can sync shared table state.', table: tablePayload(table) });
+      }
       table.rev += 1;
       table.snapshot = body.snapshot || {};
       table.updatedAt = new Date().toISOString();
