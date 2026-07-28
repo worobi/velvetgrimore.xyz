@@ -51,6 +51,7 @@ KNOWN LIMITATIONS
 - The action feed records dice rolls, scene changes, safety signals, ready changes, map reveals, Intimate Table events, table chat, and notes/cards.
 - Players can submit allowed table actions; sensitive actions such as map reveal and movement requests can wait in the Warden approval lane.
 - V6 applies approved movement, map reveal, and scene branch requests to the shared table state and records applied/rejected receipts.
+- V7 adds an Admin session timeline with category/player/bookmark filters, recap exports, private-safe modes, bookmarks, and next-session notes.
 - Clients use live server-push updates for table, chat, and activity changes, with event-ID polling kept as a fallback.
 - In Docker/Coolify, mount persistent storage at `/data` so table-code state survives rebuilds.
 - Discord webhooks send selected events to Discord only if you configure one.

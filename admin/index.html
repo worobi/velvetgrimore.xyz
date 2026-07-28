@@ -717,6 +717,38 @@ hr.divider { border: none; border-top: 1px solid var(--border); margin: 24px 0; 
         <div id="syncEventRail" style="display:grid;gap:8px;max-height:260px;overflow:auto;background:rgba(0,0,0,0.18);border:1px solid var(--border);border-radius:6px;padding:10px;"></div>
       </div>
       <div style="margin-top:14px;border-top:1px solid var(--border);padding-top:12px;">
+        <div style="font-family:'Cinzel',serif;color:var(--gold);font-size:12px;letter-spacing:1px;text-transform:uppercase;margin-bottom:8px;">Session Timeline</div>
+        <div class="flex gap-8" style="flex-wrap:wrap;margin-bottom:8px;">
+          <select id="timelineCategory" onchange="renderSyncTimeline()" style="min-width:130px;">
+            <option value="">All Categories</option>
+            <option value="scene">Scenes</option>
+            <option value="roll">Rolls</option>
+            <option value="safety">Safety</option>
+            <option value="chat">Chat</option>
+            <option value="map">Map</option>
+            <option value="approval">Approvals</option>
+            <option value="intimate">Intimate</option>
+            <option value="note">Notes</option>
+          </select>
+          <select id="timelineBookmark" onchange="renderSyncTimeline()" style="min-width:130px;">
+            <option value="">All Bookmarks</option>
+            <option value="important">Important</option>
+            <option value="turning-point">Turning Point</option>
+            <option value="follow-up">Follow-up</option>
+            <option value="cut">Cut</option>
+          </select>
+          <input type="text" id="timelinePlayer" placeholder="Filter player..." oninput="renderSyncTimeline()" style="min-width:130px;">
+          <select id="timelinePrivacy" onchange="renderSyncTimeline()" style="min-width:150px;">
+            <option value="player">Player-Safe Recap</option>
+            <option value="full">Full Warden Log</option>
+            <option value="safety">Safety/Consent Only</option>
+          </select>
+          <button class="btn btn-gold btn-sm" onclick="exportTimeline('markdown')">Export MD</button>
+          <button class="btn btn-ghost btn-sm" onclick="exportTimeline('html')">Export HTML</button>
+        </div>
+        <div id="syncTimeline" style="display:grid;gap:8px;max-height:340px;overflow:auto;background:rgba(0,0,0,0.18);border:1px solid var(--border);border-radius:6px;padding:10px;"></div>
+      </div>
+      <div style="margin-top:14px;border-top:1px solid var(--border);padding-top:12px;">
         <div style="font-family:'Cinzel',serif;color:var(--gold);font-size:12px;letter-spacing:1px;text-transform:uppercase;margin-bottom:8px;">Table Chat</div>
         <div id="syncChatLog" style="display:grid;gap:8px;max-height:220px;overflow:auto;background:rgba(0,0,0,0.18);border:1px solid var(--border);border-radius:6px;padding:10px;"></div>
         <div class="flex gap-8" style="margin-top:8px;">
@@ -1255,6 +1287,113 @@ function eventLabel(event) {
   return labels[event.type] || 'Event';
 }
 
+function eventCategoryLabel(category) {
+  const labels = {
+    table: 'Table',
+    chat: 'Chat',
+    sync: 'Sync',
+    roll: 'Roll',
+    scene: 'Scene',
+    safety: 'Safety',
+    map: 'Map',
+    intimate: 'Intimate',
+    note: 'Note',
+    approval: 'Approval',
+  };
+  return labels[category] || 'Note';
+}
+
+function timelineCategory(event) {
+  const map = {
+    'table.created': 'table',
+    'player.joined': 'table',
+    'player.ready': 'table',
+    'chat.message': 'chat',
+    'snapshot.updated': 'sync',
+    'dice.roll': 'roll',
+    'scene.change': 'scene',
+    'safety.signal': 'safety',
+    'map.reveal': 'map',
+    'intimacy.message': 'intimate',
+    'intimacy.card': 'intimate',
+    'movement.request': 'map',
+    'note.added': 'note',
+    'action.applied': 'approval',
+    'action.rejected': 'approval',
+  };
+  return event.category || map[event.type] || 'note';
+}
+
+function timelineEventsForMode(events, mode) {
+  const category = document.getElementById('timelineCategory')?.value || '';
+  const bookmark = document.getElementById('timelineBookmark')?.value || '';
+  const player = (document.getElementById('timelinePlayer')?.value || '').trim().toLowerCase();
+  return (events || []).filter(event => {
+    const cat = timelineCategory(event);
+    if (player && !(event.name || '').toLowerCase().includes(player)) return false;
+    if (event.recapHidden || event.bookmark === 'cut') {
+      if (mode !== 'full') return false;
+      if (category && cat !== category) return false;
+      return !bookmark || event.bookmark === bookmark;
+    }
+    if (category && cat !== category) return false;
+    if (bookmark && event.bookmark !== bookmark) return false;
+    if (mode === 'safety') return ['safety', 'approval'].includes(cat) || event.type === 'intimacy.card';
+    if (mode === 'player') return !['intimate', 'sync'].includes(cat);
+    return true;
+  });
+}
+
+function timelineLine(event) {
+  const time = event.createdAt ? new Date(event.createdAt).toLocaleString() : '';
+  const bits = [`${time}`, `[${eventCategoryLabel(timelineCategory(event))}]`, `${event.name || 'Seated Player'}`];
+  if (event.status && event.status !== 'posted') bits.push(`(${event.status})`);
+  const bookmark = event.bookmark ? ` #${event.bookmark}` : '';
+  return `${bits.filter(Boolean).join(' ')}: ${event.text || actionRequestSummary(event) || event.type}${bookmark}`;
+}
+
+function nextSessionNotes(events = (window.VGSync ? VGSync.status().events : [])) {
+  const usable = (events || []).filter(event => !event.recapHidden && event.bookmark !== 'cut');
+  const lastScene = [...usable].reverse().find(event => event.type === 'scene.change' || (event.type === 'action.applied' && event.detail?.sceneId));
+  const lastMap = [...usable].reverse().find(event => event.detail?.mapName || event.detail?.x !== undefined);
+  const followUps = usable.filter(event => event.bookmark === 'follow-up').slice(-8);
+  const lines = [];
+  if (lastScene) lines.push(`- Scene: ${lastScene.detail?.sceneTitle || lastScene.text || 'Continue from the latest scene change.'}`);
+  if (lastMap) lines.push(`- Map: ${lastMap.detail?.mapName || 'Current map'}${lastMap.detail?.x !== undefined ? ` at ${lastMap.detail.x},${lastMap.detail.y}` : ''}`);
+  if (followUps.length) lines.push(...followUps.map(event => `- Follow-up: ${event.text || actionRequestSummary(event)}`));
+  return lines.length ? lines : ['- Review the final scene, map state, and unresolved notes before play resumes.'];
+}
+
+function renderSyncTimeline(events = (window.VGSync ? VGSync.status().events : [])) {
+  const el = document.getElementById('syncTimeline');
+  if (!el) return;
+  const mode = document.getElementById('timelinePrivacy')?.value || 'player';
+  const filtered = timelineEventsForMode(events, mode);
+  if (!filtered.length) {
+    el.innerHTML = `<div style="font-size:12px;color:var(--text-muted);font-style:italic;">No timeline events match the current filters.</div>`;
+    return;
+  }
+  el.innerHTML = filtered.slice(-160).map(event => {
+    const mark = event.bookmark || '';
+    const cut = event.recapHidden || event.bookmark === 'cut';
+    return `
+      <div style="border-bottom:1px solid rgba(255,255,255,0.04);padding-bottom:9px;opacity:${cut ? '0.62' : '1'};">
+        <div style="display:flex;justify-content:space-between;gap:10px;font-size:12px;color:var(--text-muted);">
+          <span><strong style="color:var(--text);">${escHtml(eventCategoryLabel(timelineCategory(event)))}</strong> · ${escHtml(eventLabel(event))} · ${escHtml(event.name || 'Seated Player')}</span>
+          <span>${escHtml(event.createdAt ? new Date(event.createdAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }) : '')}</span>
+        </div>
+        <div style="font-size:14px;color:var(--text-dim);line-height:1.5;margin-top:3px;">${escHtml(event.text || actionRequestSummary(event) || '')}</div>
+        <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:7px;">
+          <button class="btn btn-ghost btn-sm" onclick="setTimelineBookmark(${event.id}, '${mark === 'important' ? '' : 'important'}')">${mark === 'important' ? 'Unmark' : 'Important'}</button>
+          <button class="btn btn-ghost btn-sm" onclick="setTimelineBookmark(${event.id}, '${mark === 'turning-point' ? '' : 'turning-point'}')">Turning Point</button>
+          <button class="btn btn-ghost btn-sm" onclick="setTimelineBookmark(${event.id}, '${mark === 'follow-up' ? '' : 'follow-up'}')">Follow-up</button>
+          <button class="btn btn-ghost btn-sm" onclick="setTimelineBookmark(${event.id}, '${cut ? '' : 'cut'}')">${cut ? 'Restore' : 'Cut'}</button>
+        </div>
+      </div>
+    `;
+  }).join('');
+}
+
 function actionRequestSummary(event) {
   const d = event.detail || {};
   if (event.type === 'movement.request') {
@@ -1295,6 +1434,7 @@ function renderSyncEvents(events = (window.VGSync ? VGSync.status().events : [])
   const el = document.getElementById('syncEventRail');
   if (!el) return;
   renderSyncActionQueue(events);
+  renderSyncTimeline(events);
   if (!events?.length) {
     el.innerHTML = `<div style="font-size:12px;color:var(--text-muted);font-style:italic;">No table activity yet.</div>`;
     return;
@@ -1394,6 +1534,67 @@ async function reviewSyncEvent(eventId, action) {
     toast(`Review failed: ${err.message}`, 'error');
     updateSyncStatus({ ...VGSync.status(), error: err.message });
   }
+}
+
+async function setTimelineBookmark(eventId, bookmark) {
+  if (!window.VGSync) return;
+  try {
+    await VGSync.updateEventMeta(eventId, {
+      bookmark,
+      recapHidden: bookmark === 'cut',
+    });
+    renderSyncTimeline(VGSync.status().events);
+    renderSyncEvents(VGSync.status().events);
+    toast(bookmark ? 'Timeline mark saved.' : 'Timeline mark cleared.', 'success');
+  } catch (err) {
+    toast(`Timeline update failed: ${err.message}`, 'error');
+  }
+}
+
+function downloadText(filename, text, type = 'text/plain') {
+  const blob = new Blob([text], { type });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 500);
+}
+
+function exportTimeline(format = 'markdown') {
+  const status = window.VGSync ? VGSync.status() : null;
+  const events = status?.events || [];
+  const mode = document.getElementById('timelinePrivacy')?.value || 'player';
+  const filtered = timelineEventsForMode(events, mode);
+  const title = `Velvet Grimoire Session Recap - ${status?.code || 'Local Table'}`;
+  const notes = nextSessionNotes(events);
+  if (format === 'html') {
+    const rows = filtered.map(event => `<li><strong>${escHtml(eventCategoryLabel(timelineCategory(event)))}</strong> ${escHtml(timelineLine(event))}</li>`).join('\n');
+    const html = `<!doctype html>
+<html><head><meta charset="utf-8"><title>${escHtml(title)}</title>
+<style>body{font-family:Georgia,serif;max-width:840px;margin:40px auto;line-height:1.6;color:#241b24;}h1,h2{font-family:Georgia,serif;}li{margin:0 0 10px;}code{background:#f4f0f4;padding:2px 4px;}</style></head>
+<body><h1>${escHtml(title)}</h1><p>Mode: ${escHtml(mode)}. Exported ${new Date().toLocaleString()}.</p><h2>Timeline</h2><ol>${rows}</ol><h2>Next Session Starts Here</h2><ul>${notes.map(line => `<li>${escHtml(line.replace(/^[-] /, ''))}</li>`).join('\n')}</ul></body></html>`;
+    downloadText(`velvet-grimoire-${status?.code || 'session'}-recap.html`, html, 'text/html');
+    return;
+  }
+  const md = [
+    `# ${title}`,
+    '',
+    `Mode: ${mode}`,
+    `Exported: ${new Date().toLocaleString()}`,
+    '',
+    '## Timeline',
+    '',
+    ...(filtered.length ? filtered.map(event => `- ${timelineLine(event)}`) : ['- No events matched the current filters.']),
+    '',
+    '## Next Session Starts Here',
+    '',
+    ...notes,
+    '',
+  ].join('\n');
+  downloadText(`velvet-grimoire-${status?.code || 'session'}-recap.md`, md, 'text/markdown');
 }
 
 async function toggleReady() {

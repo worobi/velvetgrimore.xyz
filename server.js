@@ -34,6 +34,24 @@ const EVENT_TYPES = new Set([
 ]);
 const SENSITIVE_EVENT_TYPES = new Set(['map.reveal', 'movement.request', 'scene.change']);
 const APPLY_EVENT_TYPES = new Set(['map.reveal', 'movement.request', 'scene.change']);
+const EVENT_CATEGORIES = {
+  'table.created': 'table',
+  'player.joined': 'table',
+  'player.ready': 'table',
+  'chat.message': 'chat',
+  'snapshot.updated': 'sync',
+  'dice.roll': 'roll',
+  'scene.change': 'scene',
+  'safety.signal': 'safety',
+  'map.reveal': 'map',
+  'intimacy.message': 'intimate',
+  'intimacy.card': 'intimate',
+  'movement.request': 'map',
+  'note.added': 'note',
+  'action.applied': 'approval',
+  'action.rejected': 'approval',
+};
+const EVENT_BOOKMARKS = new Set(['', 'important', 'turning-point', 'follow-up', 'cut']);
 
 const MIME = {
   '.html': 'text/html; charset=utf-8',
@@ -99,6 +117,15 @@ function cleanPlayer(input = {}, fallbackRole = 'protagonist', options = {}) {
   };
 }
 
+function eventCategory(type, fallback = '') {
+  return EVENT_CATEGORIES[type] || fallback || 'note';
+}
+
+function cleanBookmark(value) {
+  const next = String(value || '').trim().toLowerCase();
+  return EVENT_BOOKMARKS.has(next) ? next : '';
+}
+
 function normalizeTable(table) {
   const now = new Date().toISOString();
   if (!table.players || typeof table.players !== 'object' || Array.isArray(table.players)) table.players = {};
@@ -135,6 +162,9 @@ function normalizeTable(table) {
     role: cleanRole(event.role, 'protagonist'),
     text: String(event.text || '').slice(0, 1000),
     detail: event.detail && typeof event.detail === 'object' && !Array.isArray(event.detail) ? event.detail : {},
+    category: eventCategory(event.type, event.category),
+    bookmark: cleanBookmark(event.bookmark),
+    recapHidden: !!event.recapHidden,
     createdAt: event.createdAt || now,
     approvedAt: event.approvedAt || null,
     approvedBy: event.approvedBy || null,
@@ -237,6 +267,9 @@ function cleanEvent(input = {}, player = null) {
     role: cleanRole(input.role || player?.role, player?.role || 'protagonist'),
     text,
     detail,
+    category: eventCategory(type, input.category),
+    bookmark: cleanBookmark(input.bookmark),
+    recapHidden: !!input.recapHidden,
   };
 }
 
@@ -784,11 +817,22 @@ async function handleApi(req, res, pathname) {
       if (!id) return send(res, 400, { error: 'Player clientId is required' });
       const fallbackRole = table.players[id]?.role || input.role || body.role || 'protagonist';
       const player = upsertPlayer(table, { ...input, clientId: id }, fallbackRole);
-      if (!player || player.role !== 'warden') return send(res, 403, { error: 'Only the Warden can approve table actions.' });
+      if (!player || player.role !== 'warden') return send(res, 403, { error: 'Only the Warden can update table actions.' });
       const event = table.events.find(item => item.id === eventId);
       if (!event) return send(res, 404, { error: 'Event not found' });
-      if (event.status !== 'pending') return send(res, 409, { error: 'Event is not pending approval.' });
       const action = String(body.action || '').toLowerCase();
+
+      if (action === 'meta') {
+        if (body.bookmark !== undefined) event.bookmark = cleanBookmark(body.bookmark);
+        if (body.recapHidden !== undefined) event.recapHidden = !!body.recapHidden;
+        if (body.category !== undefined) event.category = eventCategory(event.type, body.category);
+        data.tables[tableCode] = table;
+        writeTables(data);
+        broadcastTable(tableCode, 'event.meta', table);
+        return send(res, 200, { ...eventsPayload(table, 0, true), event });
+      }
+
+      if (event.status !== 'pending') return send(res, 409, { error: 'Event is not pending approval.' });
       if (!['approve', 'reject'].includes(action)) return send(res, 400, { error: 'Approval action must be approve or reject.' });
       event.status = action === 'approve' ? 'approved' : 'rejected';
       event.approvedAt = new Date().toISOString();

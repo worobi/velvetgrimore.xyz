@@ -399,6 +399,25 @@ const VGSync = (() => {
     return payload.event;
   }
 
+  async function updateEventMeta(eventId, meta = {}) {
+    const config = getConfig();
+    if (!config.enabled || !config.code) throw new Error('Join or create a table first.');
+    const payload = await request(`/api/tables/${config.code}/events/${encodeURIComponent(eventId)}`, {
+      method: 'PATCH',
+      body: JSON.stringify({
+        action: 'meta',
+        bookmark: meta.bookmark,
+        recapHidden: meta.recapHidden,
+        category: meta.category,
+        player: playerPayload(),
+      }),
+    });
+    mergeEvents(payload.events || [], payload.lastEventId || 0);
+    callbacks.onEvents?.(events);
+    callbacks.onStatus?.(status());
+    return payload.event;
+  }
+
   async function updatePlayer(updates = {}) {
     const config = getConfig();
     if (!config.code) throw new Error('Join or create a table first.');
@@ -552,6 +571,7 @@ const VGSync = (() => {
     fetchEvents,
     recordEvent,
     reviewEvent,
+    updateEventMeta,
     updatePlayer,
     setReady,
     pull,
