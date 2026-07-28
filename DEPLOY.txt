@@ -27,6 +27,7 @@ Required paths:
 - /pause.html
 - /compact/SAFETY.md
 - /compact/TAGS.md
+- /velvet-grimoire-cliff-notes.docx
 
 LOCAL TEST
 You can open index.html directly, but a local server is better because the app uses absolute paths such as /pause.html.
@@ -46,12 +47,18 @@ Coolify:
   Deploy this repo as a Dockerfile app.
   Container port: 80
   Public domains: velvetgrimore.xyz, www.velvetgrimore.xyz, vg.highfunctioningchaos.living
+  Current host: 159.198.39.151
+  SSH port for server maintenance: 22022
+  Coolify app label: coolify.resourceName=velvet-grimore
 
 The included Dockerfile runs:
 
   node server.js
 
 with PORT=80 inside the container.
+
+Current production routing is Coolify/Traefik -> the app container -> node server.js.
+This GitHub repo is the source of truth for future Coolify rebuilds.
 
 Direct VPS:
 

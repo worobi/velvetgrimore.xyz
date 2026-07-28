@@ -36,6 +36,7 @@ WHAT IS INCLUDED
 - deploy/nginx-velvetgrimore.conf: nginx reverse-proxy template
 - pause.html: Threshold, Ember, Hearth, and Compact surface
 - compact/SAFETY.md and compact/TAGS.md: safety framework and ward vocabulary
+- velvet-grimoire-cliff-notes.docx: first-session quick reference
 - DEMO-WALKTHROUGH.md: guided first-run demo
 - INTIMATE-TABLE.md: guide to the in-character intimate messaging layer
 - CONTENT-PACKS.md: starter content pack ideas

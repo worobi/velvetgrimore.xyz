@@ -261,7 +261,7 @@ The two Hallowed defaults are non-removable by any workflow. They are the floor 
 - **Ember signals** — `SAFETY.md` §II, `pause.html` (Ember panel)
 - **Threshold rite** — `SAFETY.md` §III, `pause.html` (Threshold panel)
 - **Hearth stations** — `SAFETY.md` §V, `pause.html` (Hearth panel)
-- **Fourth Response (Fawn)** — `SAFETY.md` §VII — supported as the fourth branch in scene authoring and live session controls
+- **Fourth Response (Fawn)** — `SAFETY.md` §VII — implemented as the fourth branch in scene authoring and live session controls
 
 ---
 
