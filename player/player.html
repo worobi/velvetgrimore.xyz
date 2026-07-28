@@ -615,8 +615,9 @@ function initRemoteSync() {
 function updatePlayerSyncStatus(status = (window.VGSync ? VGSync.status() : null)) {
   const el = document.getElementById('playerSyncStatus');
   if (!el || !status) return;
+  const liveText = status.liveConnected ? 'live updates on' : (status.liveState === 'reconnecting' ? 'live reconnecting' : 'polling fallback');
   el.textContent = status.enabled && status.code
-    ? `Connected to table ${status.code} · ${status.role || 'protagonist'} · ${status.ready ? 'ready' : 'not ready'} · ${status.canWriteSharedState ? 'state control on' : 'view only'} · revision ${status.lastRev || 0}${status.error ? ` · ${status.error}` : ''}`
+    ? `Connected to table ${status.code} · ${liveText} · ${status.role || 'protagonist'} · ${status.ready ? 'ready' : 'not ready'} · ${status.canWriteSharedState ? 'state control on' : 'view only'} · revision ${status.lastRev || 0}${status.error ? ` · ${status.error}` : ''}`
     : (status.error ? `Sync error: ${status.error}` : '');
   renderPlayerLobby(status.table);
 }

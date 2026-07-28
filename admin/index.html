@@ -1178,8 +1178,9 @@ function initRemoteSync() {
 function updateSyncStatus(status = (window.VGSync ? VGSync.status() : null)) {
   const el = document.getElementById('syncStatus');
   if (!el || !status) return;
+  const liveText = status.liveConnected ? 'live updates on' : (status.liveState === 'reconnecting' ? 'live reconnecting' : 'polling fallback');
   const state = status.enabled && status.code
-    ? `Remote sync is on. Table code: ${escHtml(status.code)} · revision ${status.lastRev || 0} · ${escHtml(status.role || 'warden')}${status.ready ? ' · ready' : ''} · ${status.canWriteSharedState ? 'state control on' : 'view only'}`
+    ? `Remote sync is on. Table code: ${escHtml(status.code)} · ${escHtml(liveText)} · revision ${status.lastRev || 0} · ${escHtml(status.role || 'warden')}${status.ready ? ' · ready' : ''} · ${status.canWriteSharedState ? 'state control on' : 'view only'}`
     : 'Remote sync is off.';
   el.innerHTML = status.error
     ? `${state}<br><span style="color:var(--red-bright);">Last error: ${escHtml(status.error)}</span>`

@@ -1,6 +1,6 @@
 // ============================================================
 // VELVET GRIMOIRE — Remote Table Sync Client
-// Polling sync for table-code multiplayer through server.js.
+// Live sync for table-code multiplayer through server.js, with polling fallback.
 // ============================================================
 
 const VGSync = (() => {
@@ -30,6 +30,8 @@ const VGSync = (() => {
   let messages = [];
   let lastEventId = 0;
   let events = [];
+  let liveStream = null;
+  let liveState = 'off';
 
   function uid() {
     return Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
@@ -136,6 +138,97 @@ const VGSync = (() => {
     return body;
   }
 
+  function mergeMessages(incoming = [], payloadLastMessageId = 0) {
+    if (incoming.length) {
+      const seen = new Set(messages.map(message => message.id));
+      messages = [...messages, ...incoming.filter(message => !seen.has(message.id))].slice(-100);
+      lastMessageId = Math.max(lastMessageId, payloadLastMessageId || 0, ...incoming.map(message => message.id || 0));
+    } else {
+      lastMessageId = Math.max(lastMessageId, payloadLastMessageId || 0);
+    }
+  }
+
+  function mergeEvents(incoming = [], payloadLastEventId = 0) {
+    if (incoming.length) {
+      const byId = new Map(events.map(event => [event.id, event]));
+      incoming.forEach(event => byId.set(event.id, event));
+      events = Array.from(byId.values()).sort((a, b) => a.id - b.id).slice(-120);
+    }
+    lastEventId = Math.max(lastEventId, payloadLastEventId || 0);
+  }
+
+  function applyLivePayload(payload = {}) {
+    const config = getConfig();
+    if (payload.table) {
+      lastTable = payload.table;
+      if (payload.table.rev > (config.lastRev || 0)) {
+        if (payload.table.updatedBy !== config.clientId) {
+          applySnapshot(payload.table.snapshot);
+          lastFingerprint = fingerprint(payload.table.snapshot);
+        }
+        saveConfig({ ...config, lastRev: payload.table.rev });
+      }
+      callbacks.onLobby?.(payload.table);
+    }
+    if (payload.messages) {
+      mergeMessages(payload.messages.messages || [], payload.messages.lastMessageId || 0);
+      callbacks.onChat?.(messages);
+    }
+    if (payload.events) {
+      mergeEvents(payload.events.events || [], payload.events.lastEventId || 0);
+      callbacks.onEvents?.(events);
+    }
+    callbacks.onLive?.({ state: liveState, reason: payload.reason || 'sync', sentAt: payload.sentAt || null });
+    callbacks.onStatus?.(status());
+  }
+
+  function streamUrl(config = getConfig()) {
+    const base = new URL(config.apiBase || location.origin, location.href);
+    const url = new URL(`/api/tables/${config.code}/stream`, base);
+    url.searchParams.set('clientId', config.clientId);
+    url.searchParams.set('role', syncRoleToTableRole(config.role));
+    url.searchParams.set('lastMessageId', String(lastMessageId || 0));
+    url.searchParams.set('lastEventId', String(lastEventId || 0));
+    if (canWriteSharedState()) url.searchParams.set('pending', '1');
+    return url.toString();
+  }
+
+  function closeLiveStream() {
+    if (liveStream) liveStream.close();
+    liveStream = null;
+    liveState = 'off';
+  }
+
+  function openLiveStream() {
+    const config = getConfig();
+    if (!config.enabled || !config.code || typeof EventSource === 'undefined') {
+      closeLiveStream();
+      callbacks.onStatus?.(status());
+      return;
+    }
+    if (liveStream) liveStream.close();
+    liveState = 'connecting';
+    liveStream = new EventSource(streamUrl(config));
+    liveStream.addEventListener('open', () => {
+      liveState = 'live';
+      callbacks.onLive?.({ state: liveState, reason: 'connected' });
+      callbacks.onStatus?.(status());
+    });
+    liveStream.addEventListener('sync', event => {
+      liveState = 'live';
+      try {
+        applyLivePayload(JSON.parse(event.data || '{}'));
+      } catch (err) {
+        callbacks.onError?.(err);
+      }
+    });
+    liveStream.addEventListener('error', () => {
+      liveState = 'reconnecting';
+      callbacks.onLive?.({ state: liveState, reason: 'stream-error' });
+      callbacks.onStatus?.(status());
+    });
+  }
+
   async function createTable(name = 'Velvet Table') {
     const config = getConfig();
     const local = snapshot();
@@ -223,14 +316,7 @@ const VGSync = (() => {
     if (!config.enabled || !config.code) return [];
     const payload = await request(`/api/tables/${config.code}/messages?since=${force ? 0 : lastMessageId}`);
     if (force) messages = [];
-    const incoming = payload.messages || [];
-    if (incoming.length) {
-      const seen = new Set(messages.map(message => message.id));
-      messages = [...messages, ...incoming.filter(message => !seen.has(message.id))].slice(-100);
-      lastMessageId = Math.max(lastMessageId, payload.lastMessageId || 0, ...incoming.map(message => message.id || 0));
-    } else {
-      lastMessageId = Math.max(lastMessageId, payload.lastMessageId || 0);
-    }
+    mergeMessages(payload.messages || [], payload.lastMessageId || 0);
     callbacks.onChat?.(messages);
     callbacks.onStatus?.(status());
     return messages;
@@ -247,8 +333,7 @@ const VGSync = (() => {
       }),
     });
     const incoming = payload.messages || [];
-    const seen = new Set(messages.map(message => message.id));
-    messages = [...messages, ...incoming.filter(message => !seen.has(message.id))].slice(-100);
+    mergeMessages(incoming, payload.lastMessageId || 0);
     lastMessageId = Math.max(lastMessageId, payload.lastMessageId || 0, payload.message?.id || 0);
     callbacks.onChat?.(messages);
     callbacks.onStatus?.(status());
@@ -262,13 +347,7 @@ const VGSync = (() => {
     const pending = includePending ? '&pending=1' : '';
     const payload = await request(`/api/tables/${config.code}/events?since=${since}${pending}`);
     if (force) events = [];
-    const incoming = payload.events || [];
-    if (incoming.length) {
-      const byId = new Map(events.map(event => [event.id, event]));
-      incoming.forEach(event => byId.set(event.id, event));
-      events = Array.from(byId.values()).sort((a, b) => a.id - b.id).slice(-120);
-    }
-    lastEventId = Math.max(lastEventId, payload.lastEventId || 0);
+    mergeEvents(payload.events || [], payload.lastEventId || 0);
     callbacks.onEvents?.(events);
     callbacks.onStatus?.(status());
     return events;
@@ -287,16 +366,14 @@ const VGSync = (() => {
         player: playerPayload(),
       }),
     });
+    const previousLastEventId = lastEventId;
     const incoming = payload.events || [];
-    if (incoming.length) {
-      const byId = new Map(events.map(event => [event.id, event]));
-      incoming.forEach(event => byId.set(event.id, event));
-      events = Array.from(byId.values()).sort((a, b) => a.id - b.id).slice(-120);
-    } else if (payload.event) {
+    mergeEvents(incoming, payload.lastEventId || 0);
+    if (!incoming.length && payload.event) {
       events = [...events.filter(event => event.id !== payload.event.id), payload.event].sort((a, b) => a.id - b.id).slice(-120);
     }
     if (payload.event?.status === 'pending' && !canWriteSharedState()) {
-      lastEventId = Math.max(lastEventId, (payload.event.id || 1) - 1);
+      lastEventId = Math.max(previousLastEventId, (payload.event.id || 1) - 1);
     } else {
       lastEventId = Math.max(lastEventId, payload.lastEventId || 0, payload.event?.id || 0);
     }
@@ -316,11 +393,7 @@ const VGSync = (() => {
       }),
     });
     const incoming = payload.events || [];
-    if (incoming.length) {
-      const byId = new Map(events.map(event => [event.id, event]));
-      incoming.forEach(event => byId.set(event.id, event));
-      events = Array.from(byId.values()).sort((a, b) => a.id - b.id).slice(-120);
-    }
+    mergeEvents(incoming, payload.lastEventId || 0);
     callbacks.onEvents?.(events);
     callbacks.onStatus?.(status());
     return payload.event;
@@ -329,6 +402,7 @@ const VGSync = (() => {
   async function updatePlayer(updates = {}) {
     const config = getConfig();
     if (!config.code) throw new Error('Join or create a table first.');
+    const roleChanged = updates.role !== undefined && syncRoleToTableRole(updates.role) !== syncRoleToTableRole(config.role);
     const nextConfig = saveConfig({
       ...config,
       playerName: updates.name || config.playerName || defaultPlayerName(),
@@ -346,6 +420,7 @@ const VGSync = (() => {
     lastTable = table;
     callbacks.onLobby?.(table);
     callbacks.onStatus?.(status());
+    if (roleChanged) openLiveStream();
     return table;
   }
 
@@ -396,10 +471,13 @@ const VGSync = (() => {
     if (busy) return;
     busy = true;
     try {
-      await pull();
+      const liveActive = liveState === 'live';
+      if (!liveActive) await pull();
       await heartbeat();
-      await fetchMessages();
-      await fetchEvents();
+      if (!liveActive) {
+        await fetchMessages();
+        await fetchEvents();
+      }
       await push();
     } catch (err) {
       callbacks.onError?.(err);
@@ -413,13 +491,19 @@ const VGSync = (() => {
     if (!lastFingerprint) lastFingerprint = fingerprint();
     if (timer) clearInterval(timer);
     const config = getConfig();
-    if (config.enabled && config.code) timer = setInterval(tick, 2000);
+    if (config.enabled && config.code) {
+      openLiveStream();
+      timer = setInterval(tick, 2000);
+    } else {
+      closeLiveStream();
+    }
     callbacks.onStatus?.(status());
   }
 
   function stop() {
     if (timer) clearInterval(timer);
     timer = null;
+    closeLiveStream();
     const config = getConfig();
     saveConfig({ ...config, enabled: false });
     callbacks.onStatus?.(status());
@@ -437,6 +521,8 @@ const VGSync = (() => {
       role: syncRoleToTableRole(config.role || localStorage.getItem('vg_role')),
       ready: !!config.ready,
       canWriteSharedState: canWriteSharedState(),
+      liveState,
+      liveConnected: liveState === 'live',
       permissions: lastTable?.permissions || null,
       messages,
       lastMessageId,

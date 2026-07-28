@@ -14,6 +14,7 @@ const PLAYER_ROLES = new Set(['warden', 'protagonist', 'boss', 'spectator']);
 const PRESENCE_ONLINE_MS = 20_000;
 const MAX_MESSAGES = 200;
 const MAX_EVENTS = 500;
+const LIVE_KEEPALIVE_MS = 15_000;
 const EVENT_TYPES = new Set([
   'table.created',
   'player.joined',
@@ -43,6 +44,8 @@ const MIME = {
   '.jpeg': 'image/jpeg',
   '.svg': 'image/svg+xml',
 };
+
+const liveStreams = new Map();
 
 function ensureDataFile() {
   if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
@@ -341,9 +344,92 @@ function tablePayload(table) {
   };
 }
 
+function writeLive(res, event, payload) {
+  res.write(`event: ${event}\n`);
+  res.write(`data: ${JSON.stringify(payload)}\n\n`);
+}
+
+function liveClientPayload(table, client, reason = 'sync') {
+  const messages = messagesPayload(table, client.lastMessageId || 0);
+  const events = eventsPayload(table, client.lastEventId || 0, client.includePending);
+  client.lastMessageId = Math.max(client.lastMessageId || 0, messages.lastMessageId || 0);
+  client.lastEventId = Math.max(client.lastEventId || 0, events.lastEventId || 0);
+  return {
+    reason,
+    table: tablePayload(table),
+    messages,
+    events,
+    sentAt: new Date().toISOString(),
+  };
+}
+
+function broadcastTable(tableCode, reason, table) {
+  const codeKey = String(tableCode || '').toUpperCase();
+  const clients = liveStreams.get(codeKey);
+  if (!clients || !clients.size) return;
+  for (const client of Array.from(clients)) {
+    try {
+      writeLive(client.res, 'sync', liveClientPayload(table, client, reason));
+    } catch (err) {
+      clearInterval(client.keepalive);
+      clients.delete(client);
+    }
+  }
+  if (!clients.size) liveStreams.delete(codeKey);
+}
+
+function openLiveStream(req, res, tableCode) {
+  const data = readTables();
+  const table = data.tables[tableCode] && normalizeTable(data.tables[tableCode]);
+  if (!table) return send(res, 404, { error: 'Table not found' });
+
+  const url = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
+  const includePending = url.searchParams.get('pending') === '1' || cleanRole(url.searchParams.get('role')) === 'warden';
+  const client = {
+    res,
+    includePending,
+    lastMessageId: Number(url.searchParams.get('lastMessageId') || 0),
+    lastEventId: Number(url.searchParams.get('lastEventId') || 0),
+    keepalive: null,
+  };
+
+  res.writeHead(200, {
+    'Content-Type': 'text/event-stream; charset=utf-8',
+    'Cache-Control': 'no-store, no-transform',
+    Connection: 'keep-alive',
+    'X-Accel-Buffering': 'no',
+  });
+  res.write(': connected\n\n');
+
+  if (!liveStreams.has(tableCode)) liveStreams.set(tableCode, new Set());
+  liveStreams.get(tableCode).add(client);
+  writeLive(res, 'sync', liveClientPayload(table, client, 'connected'));
+  client.keepalive = setInterval(() => {
+    try {
+      writeLive(res, 'ping', { sentAt: new Date().toISOString() });
+    } catch (err) {
+      clearInterval(client.keepalive);
+      liveStreams.get(tableCode)?.delete(client);
+    }
+  }, LIVE_KEEPALIVE_MS);
+
+  req.on('close', () => {
+    clearInterval(client.keepalive);
+    const clients = liveStreams.get(tableCode);
+    if (!clients) return;
+    clients.delete(client);
+    if (!clients.size) liveStreams.delete(tableCode);
+  });
+}
+
 async function handleApi(req, res, pathname) {
   if (req.method === 'GET' && pathname === '/api/health') {
     return send(res, 200, { ok: true, service: 'velvet-grimoire-sync' });
+  }
+
+  const streamMatch = pathname.match(/^\/api\/tables\/([A-Z0-9]{4,10})\/stream$/i);
+  if (streamMatch && req.method === 'GET') {
+    return openLiveStream(req, res, streamMatch[1].toUpperCase());
   }
 
   if (req.method === 'POST' && pathname === '/api/tables') {
@@ -408,6 +494,7 @@ async function handleApi(req, res, pathname) {
       table.updatedBy = player.id;
       data.tables[tableCode] = table;
       writeTables(data);
+      broadcastTable(tableCode, previous ? 'player.updated' : 'player.joined', table);
       return send(res, 200, tablePayload(table));
     }
   }
@@ -431,6 +518,7 @@ async function handleApi(req, res, pathname) {
     if (!player) return send(res, 400, { error: 'Player clientId is required' });
     data.tables[tableCode] = table;
     writeTables(data);
+    broadcastTable(tableCode, 'presence.updated', table);
     return send(res, 200, tablePayload(table));
   }
 
@@ -464,6 +552,7 @@ async function handleApi(req, res, pathname) {
       }, player);
       data.tables[tableCode] = table;
       writeTables(data);
+      broadcastTable(tableCode, 'message.created', table);
       return send(res, 201, { ...messagesPayload(table), message });
     }
   }
@@ -500,6 +589,7 @@ async function handleApi(req, res, pathname) {
       if (!event) return send(res, 400, { error: 'Event could not be recorded' });
       data.tables[tableCode] = table;
       writeTables(data);
+      broadcastTable(tableCode, 'event.created', table);
       return send(res, event.status === 'pending' ? 202 : 201, { ...eventsPayload(table, 0, true), event });
     }
 
@@ -521,6 +611,7 @@ async function handleApi(req, res, pathname) {
       event.approvedBy = player.id;
       data.tables[tableCode] = table;
       writeTables(data);
+      broadcastTable(tableCode, `event.${event.status}`, table);
       return send(res, 200, { ...eventsPayload(table, 0, true), event });
     }
   }
@@ -557,6 +648,7 @@ async function handleApi(req, res, pathname) {
       addEvent(table, { type: 'snapshot.updated', text: activityText('snapshot.updated', player), detail: { rev: table.rev } }, player);
       data.tables[tableCode] = table;
       writeTables(data);
+      broadcastTable(tableCode, 'snapshot.updated', table);
       return send(res, 200, tablePayload(table));
     }
   }
