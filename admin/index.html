@@ -709,6 +709,10 @@ hr.divider { border: none; border-top: 1px solid var(--border); margin: 24px 0; 
       <div id="syncStatus" style="font-size:13px;color:var(--text-dim);line-height:1.7;margin-top:12px;">Remote sync is off.</div>
       <div id="syncLobby" style="display:grid;gap:8px;margin-top:12px;"></div>
       <div style="margin-top:14px;border-top:1px solid var(--border);padding-top:12px;">
+        <div style="font-family:'Cinzel',serif;color:var(--gold);font-size:12px;letter-spacing:1px;text-transform:uppercase;margin-bottom:8px;">Activity Feed</div>
+        <div id="syncEventRail" style="display:grid;gap:8px;max-height:260px;overflow:auto;background:rgba(0,0,0,0.18);border:1px solid var(--border);border-radius:6px;padding:10px;"></div>
+      </div>
+      <div style="margin-top:14px;border-top:1px solid var(--border);padding-top:12px;">
         <div style="font-family:'Cinzel',serif;color:var(--gold);font-size:12px;letter-spacing:1px;text-transform:uppercase;margin-bottom:8px;">Table Chat</div>
         <div id="syncChatLog" style="display:grid;gap:8px;max-height:220px;overflow:auto;background:rgba(0,0,0,0.18);border:1px solid var(--border);border-radius:6px;padding:10px;"></div>
         <div class="flex gap-8" style="margin-top:8px;">
@@ -1162,11 +1166,13 @@ function initRemoteSync() {
     onStatus: updateSyncStatus,
     onLobby: renderSyncLobby,
     onChat: renderSyncChat,
+    onEvents: renderSyncEvents,
     onError: err => updateSyncStatus({ ...VGSync.status(), error: err.message }),
   });
   updateSyncStatus(VGSync.status());
   renderSyncLobby(cfg.table);
   renderSyncChat(cfg.messages || []);
+  renderSyncEvents(cfg.events || []);
 }
 
 function updateSyncStatus(status = (window.VGSync ? VGSync.status() : null)) {
@@ -1223,6 +1229,55 @@ function renderSyncChat(messages = (window.VGSync ? VGSync.status().messages : [
   el.scrollTop = el.scrollHeight;
 }
 
+function eventLabel(event) {
+  const labels = {
+    'table.created': 'Table',
+    'player.joined': 'Joined',
+    'player.ready': 'Ready',
+    'chat.message': 'Chat',
+    'snapshot.updated': 'Sync',
+    'dice.roll': 'Roll',
+    'scene.change': 'Scene',
+    'safety.signal': 'Safety',
+    'map.reveal': 'Map',
+    'intimacy.message': 'Intimate',
+    'intimacy.card': 'Card',
+    'movement.request': 'Move',
+    'note.added': 'Note',
+  };
+  return labels[event.type] || 'Event';
+}
+
+function renderSyncEvents(events = (window.VGSync ? VGSync.status().events : [])) {
+  const el = document.getElementById('syncEventRail');
+  if (!el) return;
+  if (!events?.length) {
+    el.innerHTML = `<div style="font-size:12px;color:var(--text-muted);font-style:italic;">No table activity yet.</div>`;
+    return;
+  }
+  const canReview = window.VGSync && VGSync.status().canWriteSharedState;
+  el.innerHTML = events.slice(-80).reverse().map(event => {
+    const time = event.createdAt ? new Date(event.createdAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }) : '';
+    const pending = event.status === 'pending';
+    const review = pending && canReview ? `
+      <div style="display:flex;gap:6px;margin-top:7px;">
+        <button class="btn btn-gold btn-sm" onclick="reviewSyncEvent(${event.id}, 'approve')">Approve</button>
+        <button class="btn btn-ghost btn-sm" onclick="reviewSyncEvent(${event.id}, 'reject')">Reject</button>
+      </div>
+    ` : '';
+    return `
+      <div style="border-bottom:1px solid rgba(255,255,255,0.04);padding-bottom:8px;">
+        <div style="display:flex;justify-content:space-between;gap:10px;font-size:12px;color:var(--text-muted);">
+          <span><strong style="color:${pending ? 'var(--gold)' : 'var(--text);'};">${escHtml(eventLabel(event))}</strong> · ${escHtml(event.name || 'Seated Player')} · ${escHtml(event.status || 'posted')}</span>
+          <span>${escHtml(time)}</span>
+        </div>
+        <div style="font-size:14px;line-height:1.5;color:var(--text-dim);margin-top:3px;">${escHtml(event.text || '')}</div>
+        ${review}
+      </div>
+    `;
+  }).join('');
+}
+
 function syncInputsToConfig() {
   if (!window.VGSync) return;
   const api = document.getElementById('syncApiBase')?.value || location.origin;
@@ -1242,6 +1297,7 @@ async function createRemoteTable() {
     const result = await VGSync.createTable('Velvet Grimoire Table');
     document.getElementById('syncTableCode').value = result.table.code;
     await VGSync.fetchMessages(true);
+    await VGSync.fetchEvents(true);
     toast(`Remote table created: ${result.table.code}`, 'success');
     updateSyncStatus(VGSync.status());
   } catch (err) {
@@ -1261,6 +1317,7 @@ async function joinRemoteTable() {
     renderCampaigns();
     renderSession();
     await VGSync.fetchMessages(true);
+    await VGSync.fetchEvents(true);
     toast(`Joined remote table: ${result.table.code}`, 'success');
     updateSyncStatus(VGSync.status());
   } catch (err) {
@@ -1274,10 +1331,23 @@ async function refreshLobby() {
   try {
     const table = await VGSync.fetchLobby();
     await VGSync.fetchMessages(true);
+    await VGSync.fetchEvents(true);
     renderSyncLobby(table);
     updateSyncStatus(VGSync.status());
   } catch (err) {
     toast(`Lobby refresh failed: ${err.message}`, 'error');
+    updateSyncStatus({ ...VGSync.status(), error: err.message });
+  }
+}
+
+async function reviewSyncEvent(eventId, action) {
+  if (!window.VGSync) return;
+  try {
+    await VGSync.reviewEvent(eventId, action);
+    renderSyncEvents(VGSync.status().events);
+    toast(`Event ${action === 'approve' ? 'approved' : 'rejected'}.`, action === 'approve' ? 'success' : 'warn');
+  } catch (err) {
+    toast(`Review failed: ${err.message}`, 'error');
     updateSyncStatus({ ...VGSync.status(), error: err.message });
   }
 }
@@ -1328,6 +1398,15 @@ async function sendSyncChat() {
     toast(`Chat failed: ${err.message}`, 'error');
     updateSyncStatus({ ...VGSync.status(), error: err.message });
   }
+}
+
+function recordSyncEvent(type, detail = {}, options = {}) {
+  if (!window.VGSync) return;
+  const status = VGSync.status();
+  if (!status.enabled || !status.code) return;
+  VGSync.recordEvent(type, detail, options).catch(err => {
+    console.warn('Event feed update failed:', err.message);
+  });
 }
 
 function installDemoContent(screenshotMode = false) {
@@ -2119,6 +2198,12 @@ function launchSession(campaignId) {
     return;
   }
   VGEngine.startSession(campaignId);
+  const scene = VGEngine.getCurrentScene();
+  recordSyncEvent('scene.change', {
+    sceneId: scene?.id || null,
+    sceneTitle: scene?.title || 'Starting scene',
+    action: 'session-started',
+  });
   showPanel('session');
   toast('Session started!', 'success');
 }
@@ -2366,6 +2451,13 @@ function sendIntimacyMessage(role) {
   if (sent && input) {
     input.value = '';
     input.dataset.heat = '0';
+    recordSyncEvent('intimacy.message', {
+      sceneId: ctx.scene.id,
+      sceneTitle: ctx.scene.title,
+      role,
+      mode,
+      heatDelta,
+    });
     renderSession();
   }
 }
@@ -2383,6 +2475,12 @@ function saveIntimacyCard(role) {
     notTonight: document.getElementById(`intimacyNotTonight-${role}`)?.value || '',
     note: document.getElementById(`intimacyNote-${role}`)?.value || '',
   });
+  recordSyncEvent('intimacy.card', {
+    sceneId: ctx.scene.id,
+    sceneTitle: ctx.scene.title,
+    role,
+    wantCount: want.length,
+  });
   toast('Intimate table card saved.', 'success');
   renderSession();
 }
@@ -2396,10 +2494,27 @@ function sessionChoice(branch) {
   if (!scene) return;
   const roll = scene.requiresRoll ? VGEngine.DICE.d20() : null;
   const result = VGEngine.makeChoice(branch, roll);
+  const nextScene = VGEngine.getCurrentScene();
   if (result?.entry) {
     const branchNarrative = scene.branches?.[branch]?.narrative;
     const msg = branchNarrative ? `\n\n📖 ${branchNarrative}` : '';
     toast(`${branch.toUpperCase()}${roll ? ` — Roll: ${roll.result}` : ''}${msg.slice(0,60)}`, 'success');
+    if (roll) {
+      recordSyncEvent('dice.roll', {
+        sides: roll.sides || 20,
+        result: roll.result,
+        context: `Scene choice: ${branch}`,
+        sceneId: scene.id,
+        sceneTitle: scene.title,
+      });
+    }
+    recordSyncEvent('scene.change', {
+      fromSceneId: scene.id,
+      fromSceneTitle: scene.title,
+      sceneId: nextScene?.id || null,
+      sceneTitle: nextScene?.title || 'End / TBD',
+      branch,
+    });
   }
   renderSession();
 }
@@ -2410,6 +2525,12 @@ function sessionGoBack() {
     return;
   }
   VGEngine.goBack();
+  const scene = VGEngine.getCurrentScene();
+  recordSyncEvent('scene.change', {
+    sceneId: scene?.id || null,
+    sceneTitle: scene?.title || 'Previous scene',
+    action: 'went-back',
+  });
   renderSession();
   toast('Went back one scene.', 'success');
 }
@@ -2562,6 +2683,14 @@ function rollDie(sides) {
 
   rollHistory.unshift({ sides, result: result.total ?? result.result, type, mod, time: Date.now() });
   if (rollHistory.length > 20) rollHistory.pop();
+  recordSyncEvent('dice.roll', {
+    sides,
+    result: result.result,
+    total: result.total ?? result.result,
+    type,
+    modifier: mod,
+    rolls: result.rolls || null,
+  });
   renderRollHistory();
 }
 

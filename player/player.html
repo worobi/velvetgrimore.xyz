@@ -359,6 +359,8 @@ textarea.npc-response:focus { border-color: var(--border-hot); }
     <div style="font-family:'Cinzel',serif;color:var(--gold);font-size:14px;letter-spacing:1px;margin-bottom:6px;">Table Chat</div>
     <div id="playerSyncStatus" style="font-size:13px;color:var(--text-muted);margin-bottom:10px;"></div>
     <div id="playerSyncLobby" style="display:grid;gap:8px;margin-bottom:12px;"></div>
+    <div style="font-family:'Cinzel',serif;color:var(--gold);font-size:12px;letter-spacing:1px;text-transform:uppercase;margin-bottom:8px;">Activity Feed</div>
+    <div id="playerEventRail" style="display:grid;gap:8px;max-height:220px;overflow:auto;background:rgba(0,0,0,0.18);border:1px solid var(--border);border-radius:6px;padding:10px;margin-bottom:12px;"></div>
     <div id="playerChatLog" style="display:grid;gap:8px;max-height:220px;overflow:auto;background:rgba(0,0,0,0.18);border:1px solid var(--border);border-radius:6px;padding:10px;"></div>
     <div class="remote-join-row" style="margin-top:10px;">
       <input type="text" id="playerChatInput" placeholder="Message the table..." onkeydown="if(event.key==='Enter') playerSendChat()">
@@ -602,10 +604,12 @@ function initRemoteSync() {
     onStatus: updatePlayerSyncStatus,
     onLobby: renderPlayerLobby,
     onChat: renderPlayerChat,
+    onEvents: renderPlayerEvents,
     onError: err => updatePlayerSyncStatus({ ...VGSync.status(), error: err.message }),
   });
   updatePlayerSyncStatus(VGSync.status());
   renderPlayerChat(VGSync.status().messages || []);
+  renderPlayerEvents(VGSync.status().events || []);
 }
 
 function updatePlayerSyncStatus(status = (window.VGSync ? VGSync.status() : null)) {
@@ -655,6 +659,46 @@ function renderPlayerChat(messages = (window.VGSync ? VGSync.status().messages :
   el.scrollTop = el.scrollHeight;
 }
 
+function playerEventLabel(event) {
+  const labels = {
+    'table.created': 'Table',
+    'player.joined': 'Joined',
+    'player.ready': 'Ready',
+    'chat.message': 'Chat',
+    'snapshot.updated': 'Sync',
+    'dice.roll': 'Roll',
+    'scene.change': 'Scene',
+    'safety.signal': 'Safety',
+    'map.reveal': 'Map',
+    'intimacy.message': 'Intimate',
+    'intimacy.card': 'Card',
+    'movement.request': 'Move',
+    'note.added': 'Note',
+  };
+  return labels[event.type] || 'Event';
+}
+
+function renderPlayerEvents(events = (window.VGSync ? VGSync.status().events : [])) {
+  const el = document.getElementById('playerEventRail');
+  if (!el) return;
+  if (!events?.length) {
+    el.innerHTML = `<div style="font-size:12px;color:var(--text-muted);font-style:italic;">Join a remote table to see activity.</div>`;
+    return;
+  }
+  el.innerHTML = events.slice(-50).reverse().map(event => {
+    const time = event.createdAt ? new Date(event.createdAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }) : '';
+    return `
+      <div style="border-bottom:1px solid rgba(255,255,255,0.04);padding-bottom:7px;">
+        <div style="display:flex;justify-content:space-between;gap:10px;font-size:12px;color:var(--text-muted);">
+          <span><strong style="color:${event.status === 'pending' ? 'var(--gold)' : 'var(--text);'};">${escapeHtml(playerEventLabel(event))}</strong> · ${escapeHtml(event.name || 'Seated Player')} · ${escapeHtml(event.status || 'posted')}</span>
+          <span>${escapeHtml(time)}</span>
+        </div>
+        <div style="font-size:14px;line-height:1.5;color:var(--text-dim);margin-top:3px;">${escapeHtml(event.text || '')}</div>
+      </div>
+    `;
+  }).join('');
+}
+
 async function joinRemoteTableFromPlayer() {
   if (!window.VGSync) return;
   const code = document.getElementById('playerSyncCode')?.value || '';
@@ -665,6 +709,7 @@ async function joinRemoteTableFromPlayer() {
     localStorage.setItem('vg_role', 'player');
     renderPlayerLobby(table.table);
     await VGSync.fetchMessages(true);
+    await VGSync.fetchEvents(true);
     VGEngine.resumeSession();
     refreshView();
   } catch (err) {
@@ -678,6 +723,7 @@ async function playerRefreshLobby() {
   try {
     const table = await VGSync.fetchLobby();
     await VGSync.fetchMessages(true);
+    await VGSync.fetchEvents(true);
     renderPlayerLobby(table);
     updatePlayerSyncStatus(VGSync.status());
   } catch (err) {
@@ -714,6 +760,15 @@ async function playerSendChat() {
   }
 }
 
+function recordPlayerEvent(type, detail = {}, options = {}) {
+  if (!window.VGSync) return;
+  const status = VGSync.status();
+  if (!status.enabled || !status.code) return;
+  VGSync.recordEvent(type, detail, options).catch(err => {
+    console.warn('Event feed update failed:', err.message);
+  });
+}
+
 function playerRollDie(sides) {
   if (activeSafetySignal?.tier === 'hold') {
     showToast('Hold is active. Wait for the page to resume before rolling.');
@@ -729,6 +784,13 @@ function playerRollDie(sides) {
     const btn = [...document.querySelectorAll('.die-btn')].find(b => b.textContent === 'd'+sides);
     if (btn) { btn.classList.add('rolling'); setTimeout(() => btn.classList.remove('rolling'), 400); }
   }
+  const scene = VGEngine.getCurrentScene();
+  recordPlayerEvent('dice.roll', {
+    sides,
+    result,
+    sceneId: scene?.id || null,
+    sceneTitle: scene?.title || null,
+  });
 }
 
 function getRollFlair(result, sides) {
@@ -750,6 +812,14 @@ function saveNPCResponse(sceneId) {
   }
   const text = document.getElementById('npcResponseText')?.value || '';
   localStorage.setItem('npc_response_' + sceneId, text);
+  const scene = VGEngine.getCurrentScene();
+  recordPlayerEvent('note.added', {
+    sceneId,
+    sceneTitle: scene?.title || null,
+    length: text.length,
+  }, {
+    text: `Saved a scene note${scene?.title ? ` for ${scene.title}` : ''}.`,
+  });
   showToast('Response saved!');
 }
 
@@ -945,6 +1015,13 @@ function sendIntimacyMessage(role) {
   if (sent && input) {
     input.value = '';
     input.dataset.heat = '0';
+    recordPlayerEvent('intimacy.message', {
+      sceneId: ctx.scene.id,
+      sceneTitle: ctx.scene.title,
+      role,
+      mode,
+      heatDelta,
+    });
     refreshView();
   }
 }
@@ -961,6 +1038,12 @@ function saveIntimacyCard(role) {
     ceiling: document.getElementById(`intimacyCeiling-${role}`)?.value || 'suggestive',
     notTonight: document.getElementById(`intimacyNotTonight-${role}`)?.value || '',
     note: document.getElementById(`intimacyNote-${role}`)?.value || '',
+  });
+  recordPlayerEvent('intimacy.card', {
+    sceneId: ctx.scene.id,
+    sceneTitle: ctx.scene.title,
+    role,
+    wantCount: want.length,
   });
   showToast('Intimate table card saved.');
   refreshView();

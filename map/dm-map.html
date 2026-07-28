@@ -435,6 +435,23 @@ const TILE_SIZE = 40;
 const canvas = document.getElementById('mapCanvas');
 const ctx = canvas.getContext('2d');
 
+function mapEventDetail(extra = {}) {
+  return {
+    mapId: activeMap?.id || activeMapId || '',
+    mapName: activeMap?.name || 'Current map',
+    ...extra,
+  };
+}
+
+function recordMapEvent(type, detail = {}, options = {}) {
+  if (!window.VGSync) return;
+  const status = VGSync.status();
+  if (!status.enabled || !status.code) return;
+  VGSync.recordEvent(type, detail, options).catch(err => {
+    console.warn('Event feed update failed:', err.message);
+  });
+}
+
 // ── Init ───────────────────────────────────────────────────
 window.onload = () => {
   if (window.VGSync) VGSync.start({ onApply: () => { loadMapList(); loadCampaignList(); } });
@@ -594,6 +611,14 @@ function applyTool(x, y, click = false) {
     if (result.event) showEventPopup(result.event, x, y);
     redraw();
     saveCurrentMap(true);
+    recordMapEvent('movement.request', mapEventDetail({
+      x,
+      y,
+      override: true,
+      eventLabel: result.event?.label || null,
+    }), {
+      text: `Party moved to ${x},${y} on ${activeMap.name || 'the map'}.`
+    });
   }
 }
 
@@ -756,8 +781,24 @@ function redraw() {
 
 // ── Fog ────────────────────────────────────────────────────
 function toggleFog() { showFog = !showFog; redraw(); toast(showFog ? 'Fog ON' : 'Fog OFF', 'ok'); }
-function revealAll() { if (!activeMap) return; VGMap.revealAll(activeMap); redraw(); toast('All tiles revealed','ok'); }
-function resetFog() { if (!activeMap) return; VGMap.resetFog(activeMap); redraw(); toast('Fog reset','ok'); }
+function revealAll() {
+  if (!activeMap) return;
+  VGMap.revealAll(activeMap);
+  redraw();
+  recordMapEvent('map.reveal', mapEventDetail({ action: 'reveal-all' }), {
+    text: `Revealed all of ${activeMap.name || 'the map'}.`
+  });
+  toast('All tiles revealed','ok');
+}
+function resetFog() {
+  if (!activeMap) return;
+  VGMap.resetFog(activeMap);
+  redraw();
+  recordMapEvent('map.reveal', mapEventDetail({ action: 'reset-fog' }), {
+    text: `Reset fog on ${activeMap.name || 'the map'}.`
+  });
+  toast('Fog reset','ok');
+}
 
 // ── Party Movement ─────────────────────────────────────────
 function moveParty(dx, dy) {
@@ -771,6 +812,13 @@ function moveParty(dx, dy) {
   if (result.event) showEventPopup(result.event, nx, ny);
   redraw();
   saveCurrentMap(true);
+  recordMapEvent('movement.request', mapEventDetail({
+    x: nx,
+    y: ny,
+    eventLabel: result.event?.label || null,
+  }), {
+    text: `Party moved to ${nx},${ny} on ${activeMap.name || 'the map'}.`
+  });
   // Sync to VGEngine session
   if (window.VGEngine) VGEngine.persistSession();
 }
@@ -788,6 +836,14 @@ function doTeleport() {
   redraw();
   saveCurrentMap(true);
   closeModal('modal-teleport');
+  recordMapEvent('movement.request', mapEventDetail({
+    x,
+    y,
+    override,
+    eventLabel: result.event?.label || null,
+  }), {
+    text: `Party teleported to ${x},${y} on ${activeMap.name || 'the map'}.`
+  });
   toast(`Party moved to ${x},${y}`, 'ok');
 }
 
@@ -836,6 +892,9 @@ function launchLinkedScene(sceneId) {
     if (campaign) {
       VGEngine.getState().session.currentSceneId = sceneId;
       VGEngine.persistSession();
+      recordMapEvent('scene.change', mapEventDetail({ sceneId }), {
+        text: `Launched linked scene ${sceneId}.`
+      });
       toast('Scene activated in session!', 'ok');
     }
   }

@@ -1112,6 +1112,14 @@ function sendSignal(tier) {
     localStorage.setItem('vg_signals', JSON.stringify(log.slice(-50)));
   } catch(e) {}
   renderSignalLog();
+  if (window.VGSync) {
+    const cfg = VGSync.getConfig();
+    if (cfg.enabled && cfg.code) {
+      VGSync.recordEvent('safety.signal', { tier }, {
+        text: `${cfg.playerName || 'Someone'} raised ${tier}.`
+      }).catch(err => console.warn('Event feed update failed:', err.message));
+    }
+  }
   const labels = {
     dim: '🟡 Dim — softer on this beat',
     hold: '🟠 Hold — pause, breath',

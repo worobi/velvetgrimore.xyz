@@ -28,6 +28,8 @@ const VGSync = (() => {
   let lastPresenceAt = 0;
   let lastMessageId = 0;
   let messages = [];
+  let lastEventId = 0;
+  let events = [];
 
   function uid() {
     return Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
@@ -150,6 +152,8 @@ const VGSync = (() => {
     lastTable = table;
     messages = [];
     lastMessageId = 0;
+    events = [];
+    lastEventId = 0;
     const next = saveConfig({ ...config, enabled: true, code: table.code, lastRev: table.rev, role: 'warden', ready: true });
     lastFingerprint = fingerprint(local);
     start(callbacks);
@@ -172,6 +176,8 @@ const VGSync = (() => {
     lastTable = joined;
     messages = [];
     lastMessageId = 0;
+    events = [];
+    lastEventId = 0;
     const next = saveConfig({
       ...config,
       enabled: true,
@@ -249,6 +255,77 @@ const VGSync = (() => {
     return payload.message;
   }
 
+  async function fetchEvents(force = false, includePending = canWriteSharedState()) {
+    const config = getConfig();
+    if (!config.enabled || !config.code) return [];
+    const since = force ? 0 : lastEventId;
+    const pending = includePending ? '&pending=1' : '';
+    const payload = await request(`/api/tables/${config.code}/events?since=${since}${pending}`);
+    if (force) events = [];
+    const incoming = payload.events || [];
+    if (incoming.length) {
+      const byId = new Map(events.map(event => [event.id, event]));
+      incoming.forEach(event => byId.set(event.id, event));
+      events = Array.from(byId.values()).sort((a, b) => a.id - b.id).slice(-120);
+    }
+    lastEventId = Math.max(lastEventId, payload.lastEventId || 0);
+    callbacks.onEvents?.(events);
+    callbacks.onStatus?.(status());
+    return events;
+  }
+
+  async function recordEvent(type, detail = {}, options = {}) {
+    const config = getConfig();
+    if (!config.enabled || !config.code) return null;
+    const payload = await request(`/api/tables/${config.code}/events`, {
+      method: 'POST',
+      body: JSON.stringify({
+        type,
+        detail,
+        text: options.text,
+        approvalRequired: !!options.approvalRequired,
+        player: playerPayload(),
+      }),
+    });
+    const incoming = payload.events || [];
+    if (incoming.length) {
+      const byId = new Map(events.map(event => [event.id, event]));
+      incoming.forEach(event => byId.set(event.id, event));
+      events = Array.from(byId.values()).sort((a, b) => a.id - b.id).slice(-120);
+    } else if (payload.event) {
+      events = [...events.filter(event => event.id !== payload.event.id), payload.event].sort((a, b) => a.id - b.id).slice(-120);
+    }
+    if (payload.event?.status === 'pending' && !canWriteSharedState()) {
+      lastEventId = Math.max(lastEventId, (payload.event.id || 1) - 1);
+    } else {
+      lastEventId = Math.max(lastEventId, payload.lastEventId || 0, payload.event?.id || 0);
+    }
+    callbacks.onEvents?.(events);
+    callbacks.onStatus?.(status());
+    return payload.event;
+  }
+
+  async function reviewEvent(eventId, action) {
+    const config = getConfig();
+    if (!config.enabled || !config.code) throw new Error('Join or create a table first.');
+    const payload = await request(`/api/tables/${config.code}/events/${encodeURIComponent(eventId)}`, {
+      method: 'PATCH',
+      body: JSON.stringify({
+        action,
+        player: playerPayload(),
+      }),
+    });
+    const incoming = payload.events || [];
+    if (incoming.length) {
+      const byId = new Map(events.map(event => [event.id, event]));
+      incoming.forEach(event => byId.set(event.id, event));
+      events = Array.from(byId.values()).sort((a, b) => a.id - b.id).slice(-120);
+    }
+    callbacks.onEvents?.(events);
+    callbacks.onStatus?.(status());
+    return payload.event;
+  }
+
   async function updatePlayer(updates = {}) {
     const config = getConfig();
     if (!config.code) throw new Error('Join or create a table first.');
@@ -322,6 +399,7 @@ const VGSync = (() => {
       await pull();
       await heartbeat();
       await fetchMessages();
+      await fetchEvents();
       await push();
     } catch (err) {
       callbacks.onError?.(err);
@@ -362,6 +440,8 @@ const VGSync = (() => {
       permissions: lastTable?.permissions || null,
       messages,
       lastMessageId,
+      events,
+      lastEventId,
       table: lastTable,
       players: lastTable?.players || [],
     };
@@ -383,6 +463,9 @@ const VGSync = (() => {
     heartbeat,
     fetchMessages,
     sendMessage,
+    fetchEvents,
+    recordEvent,
+    reviewEvent,
     updatePlayer,
     setReady,
     pull,

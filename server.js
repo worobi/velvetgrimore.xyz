@@ -13,6 +13,23 @@ const PORT = Number(process.env.PORT || 8765);
 const PLAYER_ROLES = new Set(['warden', 'protagonist', 'boss', 'spectator']);
 const PRESENCE_ONLINE_MS = 20_000;
 const MAX_MESSAGES = 200;
+const MAX_EVENTS = 500;
+const EVENT_TYPES = new Set([
+  'table.created',
+  'player.joined',
+  'player.ready',
+  'chat.message',
+  'snapshot.updated',
+  'dice.roll',
+  'scene.change',
+  'safety.signal',
+  'map.reveal',
+  'intimacy.message',
+  'intimacy.card',
+  'movement.request',
+  'note.added',
+]);
+const SENSITIVE_EVENT_TYPES = new Set(['map.reveal', 'movement.request']);
 
 const MIME = {
   '.html': 'text/html; charset=utf-8',
@@ -80,12 +97,14 @@ function normalizeTable(table) {
   const now = new Date().toISOString();
   if (!table.players || typeof table.players !== 'object' || Array.isArray(table.players)) table.players = {};
   if (!Array.isArray(table.messages)) table.messages = [];
+  if (!Array.isArray(table.events)) table.events = [];
   table.createdAt = table.createdAt || now;
   table.updatedAt = table.updatedAt || table.createdAt;
   table.status = table.status || 'lobby';
   table.snapshot = table.snapshot || {};
   table.rev = Number(table.rev || 1);
   table.msgSeq = Number(table.msgSeq || 0);
+  table.evtSeq = Number(table.evtSeq || 0);
   Object.keys(table.players).forEach(id => {
     const normalized = cleanPlayer({ id, ...table.players[id] }, table.players[id]?.role || 'protagonist', { touch: false });
     if (normalized) table.players[id] = normalized;
@@ -100,6 +119,21 @@ function normalizeTable(table) {
     createdAt: message.createdAt || now,
   })).filter(message => message.text.trim()).slice(-MAX_MESSAGES);
   table.msgSeq = Math.max(table.msgSeq, ...table.messages.map(message => message.id), 0);
+  table.events = table.events.map((event, index) => ({
+    id: Number(event.id || index + 1),
+    type: EVENT_TYPES.has(event.type) ? event.type : 'note.added',
+    status: ['posted', 'pending', 'approved', 'rejected'].includes(event.status) ? event.status : 'posted',
+    approvalRequired: !!event.approvalRequired,
+    clientId: String(event.clientId || '').slice(0, 80),
+    name: String(event.name || 'Seated Player').slice(0, 80),
+    role: cleanRole(event.role, 'protagonist'),
+    text: String(event.text || '').slice(0, 1000),
+    detail: event.detail && typeof event.detail === 'object' && !Array.isArray(event.detail) ? event.detail : {},
+    createdAt: event.createdAt || now,
+    approvedAt: event.approvedAt || null,
+    approvedBy: event.approvedBy || null,
+  })).slice(-MAX_EVENTS);
+  table.evtSeq = Math.max(table.evtSeq, ...table.events.map(event => event.id), 0);
   return table;
 }
 
@@ -184,6 +218,78 @@ function messagesPayload(table, since = 0) {
   };
 }
 
+function cleanEvent(input = {}, player = null) {
+  const type = EVENT_TYPES.has(input.type) ? input.type : 'note.added';
+  const text = String(input.text || '').trim().slice(0, 1000);
+  const detail = input.detail && typeof input.detail === 'object' && !Array.isArray(input.detail) ? input.detail : {};
+  return {
+    type,
+    clientId: String(input.clientId || player?.id || '').trim().slice(0, 80),
+    name: String(input.name || player?.name || 'Seated Player').trim().slice(0, 80) || 'Seated Player',
+    role: cleanRole(input.role || player?.role, player?.role || 'protagonist'),
+    text,
+    detail,
+  };
+}
+
+function eventNeedsApproval(event) {
+  return event.role !== 'warden' && (event.approvalRequired || SENSITIVE_EVENT_TYPES.has(event.type));
+}
+
+function addEvent(table, input, player = null) {
+  normalizeTable(table);
+  const cleaned = cleanEvent(input, player);
+  if (!cleaned.clientId) return null;
+  const now = new Date().toISOString();
+  const pending = eventNeedsApproval({ ...cleaned, approvalRequired: !!input.approvalRequired });
+  table.evtSeq = Number(table.evtSeq || 0) + 1;
+  const event = {
+    id: table.evtSeq,
+    ...cleaned,
+    status: pending ? 'pending' : 'posted',
+    approvalRequired: pending,
+    createdAt: now,
+    approvedAt: null,
+    approvedBy: null,
+  };
+  table.events.push(event);
+  table.events = table.events.slice(-MAX_EVENTS);
+  table.updatedAt = now;
+  return event;
+}
+
+function eventsPayload(table, since = 0, includePending = false) {
+  normalizeTable(table);
+  const after = Number(since || 0);
+  const events = table.events.filter(event => {
+    if (event.id <= after) return false;
+    return includePending || event.status !== 'pending';
+  });
+  const lastVisibleId = events.reduce((max, event) => Math.max(max, event.id), after);
+  return {
+    code: table.code,
+    lastEventId: includePending ? (table.evtSeq || 0) : lastVisibleId,
+    events,
+  };
+}
+
+function activityText(type, player, detail = {}) {
+  const name = player?.name || 'Someone';
+  if (type === 'table.created') return `${name} created the table.`;
+  if (type === 'player.joined') return `${name} joined as ${player?.role || 'protagonist'}.`;
+  if (type === 'player.ready') return `${name} is ${detail.ready ? 'ready' : 'not ready'}.`;
+  if (type === 'chat.message') return `${name} sent a table message.`;
+  if (type === 'snapshot.updated') return `${name} synced the shared table state.`;
+  if (type === 'dice.roll') return `${name} rolled d${detail.sides || '?'}${detail.result ? `: ${detail.result}` : ''}.`;
+  if (type === 'scene.change') return `${name} changed scene${detail.sceneTitle ? ` to ${detail.sceneTitle}` : ''}.`;
+  if (type === 'safety.signal') return `${name} raised ${detail.tier || 'a safety signal'}.`;
+  if (type === 'map.reveal') return `${name} requested a map reveal.`;
+  if (type === 'intimacy.message') return `${name} sent an Intimate Table message.`;
+  if (type === 'intimacy.card') return `${name} updated an Intimate Table card.`;
+  if (type === 'movement.request') return `${name} requested movement.`;
+  return `${name} added a table note.`;
+}
+
 function send(res, status, body, headers = {}) {
   const text = typeof body === 'string' ? body : JSON.stringify(body);
   res.writeHead(status, {
@@ -258,13 +364,16 @@ async function handleApi(req, res, pathname) {
       updatedBy: body.clientId || null,
       messages: [],
       msgSeq: 0,
+      events: [],
+      evtSeq: 0,
     };
-    upsertPlayer(table, {
+    const player = upsertPlayer(table, {
       clientId: body.clientId,
       name: body.playerName || body.name || 'Warden',
       role: body.role || 'warden',
       ready: true,
     }, 'warden');
+    if (player) addEvent(table, { type: 'table.created', text: activityText('table.created', player) }, player);
     data.tables[next] = table;
     writeTables(data);
     return send(res, 201, tablePayload(table));
@@ -286,9 +395,15 @@ async function handleApi(req, res, pathname) {
       if (!canUseRole(table, id, body.role || table.players[id]?.role || 'protagonist')) {
         return send(res, 403, { error: 'Only the current Warden can keep the Warden seat.' });
       }
+      const previous = table.players[id] || null;
       const fallbackRole = table.players[id]?.role || body.role || 'protagonist';
       const player = upsertPlayer(table, { ...body, clientId: id || body.clientId }, fallbackRole);
       if (!player) return send(res, 400, { error: 'Player clientId is required' });
+      if (!previous) {
+        addEvent(table, { type: 'player.joined', text: activityText('player.joined', player), detail: { role: player.role } }, player);
+      } else if (body.ready !== undefined && !!previous.ready !== !!player.ready) {
+        addEvent(table, { type: 'player.ready', text: activityText('player.ready', player, { ready: player.ready }), detail: { ready: player.ready } }, player);
+      }
       table.rev += 1;
       table.updatedBy = player.id;
       data.tables[tableCode] = table;
@@ -342,9 +457,71 @@ async function handleApi(req, res, pathname) {
       const messageInput = body.message && typeof body.message === 'object' ? body.message : body;
       const message = addMessage(table, { ...messageInput, clientId: id }, player);
       if (!message) return send(res, 400, { error: 'Message text is required' });
+      addEvent(table, {
+        type: 'chat.message',
+        text: activityText('chat.message', player),
+        detail: { messageId: message.id },
+      }, player);
       data.tables[tableCode] = table;
       writeTables(data);
       return send(res, 201, { ...messagesPayload(table), message });
+    }
+  }
+
+  const eventMatch = pathname.match(/^\/api\/tables\/([A-Z0-9]{4,10})\/events(?:\/([0-9]+))?$/i);
+  if (eventMatch) {
+    const tableCode = eventMatch[1].toUpperCase();
+    const eventId = eventMatch[2] ? Number(eventMatch[2]) : null;
+    const data = readTables();
+    const table = data.tables[tableCode] && normalizeTable(data.tables[tableCode]);
+    if (!table) return send(res, 404, { error: 'Table not found' });
+
+    if (!eventId && req.method === 'GET') {
+      const url = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
+      return send(res, 200, eventsPayload(table, url.searchParams.get('since'), url.searchParams.get('pending') === '1'));
+    }
+
+    if (!eventId && req.method === 'POST') {
+      const body = await readBody(req);
+      const input = body.player || body;
+      const id = String(input.clientId || input.id || body.clientId || '').trim().slice(0, 80);
+      if (!id) return send(res, 400, { error: 'Player clientId is required' });
+      const fallbackRole = table.players[id]?.role || input.role || body.role || 'protagonist';
+      const player = upsertPlayer(table, { ...input, clientId: id }, fallbackRole);
+      if (!player) return send(res, 400, { error: 'Player clientId is required' });
+      const detail = body.detail && typeof body.detail === 'object' && !Array.isArray(body.detail) ? body.detail : {};
+      const type = EVENT_TYPES.has(body.type) ? body.type : 'note.added';
+      const event = addEvent(table, {
+        type,
+        text: body.text || activityText(type, player, detail),
+        detail,
+        approvalRequired: !!body.approvalRequired,
+      }, player);
+      if (!event) return send(res, 400, { error: 'Event could not be recorded' });
+      data.tables[tableCode] = table;
+      writeTables(data);
+      return send(res, event.status === 'pending' ? 202 : 201, { ...eventsPayload(table, 0, true), event });
+    }
+
+    if (eventId && req.method === 'PATCH') {
+      const body = await readBody(req);
+      const input = body.player || body;
+      const id = String(input.clientId || input.id || body.clientId || '').trim().slice(0, 80);
+      if (!id) return send(res, 400, { error: 'Player clientId is required' });
+      const fallbackRole = table.players[id]?.role || input.role || body.role || 'protagonist';
+      const player = upsertPlayer(table, { ...input, clientId: id }, fallbackRole);
+      if (!player || player.role !== 'warden') return send(res, 403, { error: 'Only the Warden can approve table actions.' });
+      const event = table.events.find(item => item.id === eventId);
+      if (!event) return send(res, 404, { error: 'Event not found' });
+      if (event.status !== 'pending') return send(res, 409, { error: 'Event is not pending approval.' });
+      const action = String(body.action || '').toLowerCase();
+      if (!['approve', 'reject'].includes(action)) return send(res, 400, { error: 'Approval action must be approve or reject.' });
+      event.status = action === 'approve' ? 'approved' : 'rejected';
+      event.approvedAt = new Date().toISOString();
+      event.approvedBy = player.id;
+      data.tables[tableCode] = table;
+      writeTables(data);
+      return send(res, 200, { ...eventsPayload(table, 0, true), event });
     }
   }
 
@@ -377,6 +554,7 @@ async function handleApi(req, res, pathname) {
       table.snapshot = body.snapshot || {};
       table.updatedAt = new Date().toISOString();
       table.updatedBy = body.clientId || null;
+      addEvent(table, { type: 'snapshot.updated', text: activityText('snapshot.updated', player), detail: { rev: table.rev } }, player);
       data.tables[tableCode] = table;
       writeTables(data);
       return send(res, 200, tablePayload(table));
