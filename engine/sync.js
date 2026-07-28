@@ -164,7 +164,12 @@ const VGSync = (() => {
       },
     });
     const body = await res.json().catch(() => ({}));
-    if (!res.ok) throw new Error(body.error || `Sync request failed (${res.status})`);
+    if (!res.ok) {
+      const err = new Error(body.error || `Sync request failed (${res.status})`);
+      err.status = res.status;
+      err.body = body;
+      throw err;
+    }
     return body;
   }
 
@@ -192,7 +197,7 @@ const VGSync = (() => {
     if (payload.table) {
       lastTable = payload.table;
       if (payload.table.rev > (config.lastRev || 0)) {
-        if (payload.table.updatedBy !== config.clientId) {
+        if (payload.table.updatedBy !== effectiveClientId(config)) {
           applySnapshot(payload.table.snapshot);
           lastFingerprint = fingerprint(payload.table.snapshot);
         }
@@ -786,6 +791,50 @@ const VGSync = (() => {
     return request('/api/accounts/audit');
   }
 
+  async function tableDirectory() {
+    return request('/api/tables');
+  }
+
+  async function tableManage(code, updates = {}) {
+    const normalized = String(code || getConfig().code || '').trim().toUpperCase();
+    if (!normalized) throw new Error('Enter a table code.');
+    const payload = await request(`/api/tables/${normalized}/manage`, {
+      method: 'PATCH',
+      body: JSON.stringify(updates),
+    });
+    if (payload.table && normalized === getConfig().code) {
+      lastTable = payload.table;
+      callbacks.onLobby?.(payload.table);
+      callbacks.onStatus?.(status());
+    }
+    return payload;
+  }
+
+  async function tableAudit(code) {
+    const normalized = String(code || getConfig().code || '').trim().toUpperCase();
+    if (!normalized) throw new Error('Enter a table code.');
+    return request(`/api/tables/${normalized}/audit`);
+  }
+
+  async function tableKickPlayer(code, playerId) {
+    const normalized = String(code || getConfig().code || '').trim().toUpperCase();
+    if (!normalized) throw new Error('Enter a table code.');
+    if (!playerId) throw new Error('Choose a player to remove.');
+    const table = await request(`/api/tables/${normalized}/players/${encodeURIComponent(playerId)}`, {
+      method: 'DELETE',
+    });
+    if (normalized === getConfig().code) {
+      lastTable = table;
+      callbacks.onLobby?.(table);
+      callbacks.onStatus?.(status());
+    }
+    return table;
+  }
+
+  async function tableTransferWarden(code, playerId) {
+    return tableManage(code, { transferWardenTo: playerId });
+  }
+
   async function accountInvites() {
     return request('/api/accounts/invites');
   }
@@ -863,7 +912,7 @@ const VGSync = (() => {
     const table = await request(`/api/tables/${config.code}`);
     lastTable = table;
     if (table.rev > (config.lastRev || 0)) {
-      if (table.updatedBy !== config.clientId) {
+      if (table.updatedBy !== effectiveClientId(config)) {
         applySnapshot(table.snapshot);
         lastFingerprint = fingerprint(table.snapshot);
       }
@@ -880,13 +929,14 @@ const VGSync = (() => {
     const local = snapshot();
     const current = fingerprint(local);
     if (current === lastFingerprint) return null;
+    const player = playerPayload();
     const table = await request(`/api/tables/${config.code}`, {
       method: 'PUT',
       body: JSON.stringify({
         snapshot: local,
         baseRev: config.lastRev || 0,
-        clientId: config.clientId,
-        player: playerPayload(),
+        clientId: player.clientId,
+        player,
       }),
     });
     lastTable = table;
@@ -950,12 +1000,14 @@ const VGSync = (() => {
       code: config.code || '',
       apiBase: config.apiBase,
       lastRev: config.lastRev || 0,
-      clientId: config.clientId,
+      clientId: effectiveClientId(config),
       playerName: account?.displayName || config.playerName || defaultPlayerName(),
       role: account ? accountRoleToTableRole(account.role) : syncRoleToTableRole(config.role || localStorage.getItem('vg_role')),
       account,
       ready: !!config.ready,
       canWriteSharedState: canWriteSharedState(),
+      locked: !!lastTable?.locked,
+      archived: !!lastTable?.archived,
       liveState,
       liveConnected: liveState === 'live',
       permissions: lastTable?.permissions || null,
@@ -1026,6 +1078,11 @@ const VGSync = (() => {
     accountUpdateInvite,
     accountAcceptInvite,
     assignedTables,
+    tableDirectory,
+    tableManage,
+    tableAudit,
+    tableKickPlayer,
+    tableTransferWarden,
     updatePlayer,
     setReady,
     pull,

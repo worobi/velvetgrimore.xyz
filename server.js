@@ -26,8 +26,15 @@ const SESSION_TTL_MS = 1000 * 60 * 60 * 24 * 14;
 const LIVE_KEEPALIVE_MS = 15_000;
 const EVENT_TYPES = new Set([
   'table.created',
+  'table.updated',
+  'table.locked',
+  'table.unlocked',
+  'table.archived',
+  'table.reopened',
   'player.joined',
+  'player.kicked',
   'player.ready',
+  'warden.transferred',
   'chat.message',
   'snapshot.updated',
   'checkpoint.created',
@@ -55,8 +62,15 @@ const SENSITIVE_EVENT_TYPES = new Set(['map.reveal', 'movement.request', 'scene.
 const APPLY_EVENT_TYPES = new Set(['map.reveal', 'movement.request', 'scene.change']);
 const EVENT_CATEGORIES = {
   'table.created': 'table',
+  'table.updated': 'table',
+  'table.locked': 'table',
+  'table.unlocked': 'table',
+  'table.archived': 'table',
+  'table.reopened': 'table',
   'player.joined': 'table',
+  'player.kicked': 'table',
   'player.ready': 'table',
+  'warden.transferred': 'table',
   'chat.message': 'chat',
   'snapshot.updated': 'sync',
   'checkpoint.created': 'sync',
@@ -327,6 +341,12 @@ function canAccessTableCode(user, tableCode) {
   return cleanTableCodes(user.tableCodes).includes(codeKey);
 }
 
+function canOperateTable(user, tableCode) {
+  if (!user) return false;
+  if (['owner', 'admin'].includes(user.role)) return true;
+  return user.role === 'warden' && canAccessTableCode(user, tableCode);
+}
+
 function authorizeTableAccess(req, tableCode) {
   const accounts = normalizeAccounts(readAccounts());
   if (!accountSystemReady(accounts)) return { ok: true, accounts, user: null };
@@ -337,6 +357,13 @@ function authorizeTableAccess(req, tableCode) {
   }
   if (accountSettings(accounts).allowGuestJoins) return { ok: true, accounts, user: null };
   return { ok: false, accounts, status: 401, error: 'Login required for this table.' };
+}
+
+function authorizeTableOperation(req, tableCode) {
+  const access = authorizeTableAccess(req, tableCode);
+  if (!access.ok) return access;
+  if (canOperateTable(access.user, tableCode)) return access;
+  return { ...access, ok: false, status: 403, error: 'Warden or Admin account required.' };
 }
 
 function authorizeTableCreate(req) {
@@ -366,6 +393,16 @@ function enforceTableCreate(req, res) {
   writeAccounts(access.accounts);
   if (!access.ok) {
     send(res, access.status || 403, { error: access.error || 'Table creation denied.' });
+    return null;
+  }
+  return access;
+}
+
+function enforceTableOperation(req, res, tableCode) {
+  const access = authorizeTableOperation(req, tableCode);
+  writeAccounts(access.accounts);
+  if (!access.ok) {
+    send(res, access.status || 403, { error: access.error || 'Table operation denied.' });
     return null;
   }
   return access;
@@ -420,6 +457,10 @@ function normalizeTable(table) {
   table.createdAt = table.createdAt || now;
   table.updatedAt = table.updatedAt || table.createdAt;
   table.status = table.status || 'lobby';
+  if (!['lobby', 'live', 'paused', 'archived'].includes(table.status)) table.status = 'lobby';
+  table.locked = !!table.locked;
+  table.archived = !!table.archived || table.status === 'archived';
+  if (table.archived) table.status = 'archived';
   table.snapshot = table.snapshot || {};
   table.rev = Number(table.rev || 1);
   table.msgSeq = Number(table.msgSeq || 0);
@@ -567,6 +608,19 @@ function canWriteSnapshot(table, clientId) {
 
 function currentWarden(table) {
   return Object.values(table.players || {}).find(player => player.role === 'warden') || null;
+}
+
+function actorPlayer(user, fallback = {}) {
+  if (!user) return cleanPlayer({
+    clientId: fallback.clientId || fallback.id || 'system',
+    name: fallback.name || 'System',
+    role: fallback.role || 'warden',
+  }, 'warden');
+  return cleanPlayer({
+    clientId: user.id,
+    name: user.displayName || user.username || 'Admin',
+    role: accountToTableRole(user.role),
+  }, 'warden');
 }
 
 function canUseRole(table, clientId, role) {
@@ -1217,6 +1271,8 @@ function tablePayload(table) {
     code: table.code,
     name: table.name,
     status: table.status || 'lobby',
+    locked: !!table.locked,
+    archived: !!table.archived,
     rev: table.rev,
     snapshot: table.snapshot || {},
     players: Object.values(table.players || {}).sort((a, b) => {
@@ -1231,6 +1287,38 @@ function tablePayload(table) {
     flow: table.flow || {},
     updatedAt: table.updatedAt,
     updatedBy: table.updatedBy || null,
+  };
+}
+
+function tableSummary(table, accounts = null) {
+  normalizeTable(table);
+  const players = tablePayload(table).players;
+  const assignedUsers = accounts
+    ? Object.values(accounts.users || {}).filter(user => user.active !== false && canAccessTableCode(user, table.code)).map(safeUser)
+    : [];
+  const warden = players.find(player => player.role === 'warden') || null;
+  return {
+    code: table.code,
+    name: table.name,
+    status: table.status || 'lobby',
+    locked: !!table.locked,
+    archived: !!table.archived,
+    playerCount: players.length,
+    onlineCount: players.filter(player => player.online).length,
+    wardenName: warden?.name || null,
+    wardenId: warden?.id || null,
+    assignedUsers,
+    createdAt: table.createdAt,
+    updatedAt: table.updatedAt,
+    rev: table.rev,
+  };
+}
+
+function tableAuditPayload(table) {
+  normalizeTable(table);
+  return {
+    code: table.code,
+    events: table.events.slice().reverse().slice(0, 100),
   };
 }
 
@@ -1590,6 +1678,29 @@ async function handleApi(req, res, pathname) {
     return openLiveStream(req, res, streamMatch[1].toUpperCase());
   }
 
+  if (req.method === 'GET' && pathname === '/api/tables') {
+    const accounts = normalizeAccounts(readAccounts());
+    if (accountSystemReady(accounts)) {
+      const auth = authenticatedUser(req, accounts);
+      writeAccounts(accounts);
+      if (!auth?.user) return send(res, 401, { error: 'Login required.' });
+      if (!['owner', 'admin', 'warden'].includes(auth.user.role)) return send(res, 403, { error: 'Warden or Admin account required.' });
+      const data = readTables();
+      const tables = Object.values(data.tables || {})
+        .map(table => normalizeTable(table))
+        .filter(table => canAccessTableCode(auth.user, table.code))
+        .map(table => tableSummary(table, accounts))
+        .sort((a, b) => String(b.updatedAt || '').localeCompare(String(a.updatedAt || '')));
+      writeTables(data);
+      return send(res, 200, { tables });
+    }
+    writeAccounts(accounts);
+    const data = readTables();
+    const tables = Object.values(data.tables || {}).map(table => tableSummary(normalizeTable(table))).sort((a, b) => String(b.updatedAt || '').localeCompare(String(a.updatedAt || '')));
+    writeTables(data);
+    return send(res, 200, { tables });
+  }
+
   if (req.method === 'POST' && pathname === '/api/tables') {
     const body = await readBody(req);
     const data = readTables();
@@ -1604,6 +1715,8 @@ async function handleApi(req, res, pathname) {
       snapshot: body.snapshot || {},
       players: {},
       status: 'lobby',
+      locked: false,
+      archived: false,
       createdAt: now,
       updatedAt: now,
       updatedBy: body.clientId || null,
@@ -1636,6 +1749,79 @@ async function handleApi(req, res, pathname) {
     return send(res, 201, tablePayload(table));
   }
 
+  const auditMatch = pathname.match(/^\/api\/tables\/([A-Z0-9]{4,10})\/audit$/i);
+  if (auditMatch) {
+    const tableCode = auditMatch[1].toUpperCase();
+    const data = readTables();
+    const table = data.tables[tableCode] && normalizeTable(data.tables[tableCode]);
+    if (!table) return send(res, 404, { error: 'Table not found' });
+    if (!enforceTableOperation(req, res, tableCode)) return;
+    data.tables[tableCode] = table;
+    writeTables(data);
+    return send(res, 200, tableAuditPayload(table));
+  }
+
+  const manageMatch = pathname.match(/^\/api\/tables\/([A-Z0-9]{4,10})\/manage$/i);
+  if (manageMatch) {
+    const tableCode = manageMatch[1].toUpperCase();
+    const data = readTables();
+    const table = data.tables[tableCode] && normalizeTable(data.tables[tableCode]);
+    if (!table) return send(res, 404, { error: 'Table not found' });
+    const access = enforceTableOperation(req, res, tableCode);
+    if (!access) return;
+    if (req.method !== 'PATCH') return send(res, 404, { error: 'Not found' });
+    const body = await readBody(req);
+    const actor = actorPlayer(access.user);
+    let eventType = 'table.updated';
+    let eventText = `${actor.name || 'Admin'} updated table settings.`;
+
+    if (body.name !== undefined) {
+      table.name = String(body.name || table.name).trim().slice(0, 80) || table.name;
+      eventText = `${actor.name || 'Admin'} renamed the table to ${table.name}.`;
+    }
+    if (body.locked !== undefined) {
+      table.locked = !!body.locked;
+      eventType = table.locked ? 'table.locked' : 'table.unlocked';
+      eventText = table.locked
+        ? `${actor.name || 'Warden'} locked the table.`
+        : `${actor.name || 'Warden'} unlocked the table.`;
+    }
+    if (body.archived !== undefined) {
+      table.archived = !!body.archived;
+      table.status = table.archived ? 'archived' : (table.status === 'archived' ? 'lobby' : table.status);
+      eventType = table.archived ? 'table.archived' : 'table.reopened';
+      eventText = table.archived
+        ? `${actor.name || 'Admin'} archived the table.`
+        : `${actor.name || 'Admin'} reopened the table.`;
+    }
+    if (body.status !== undefined && !table.archived) {
+      const status = String(body.status || '').trim().toLowerCase();
+      if (!['lobby', 'live', 'paused'].includes(status)) return send(res, 400, { error: 'Status must be lobby, live, or paused.' });
+      table.status = status;
+      eventText = `${actor.name || 'Warden'} changed table status to ${status}.`;
+    }
+    if (body.transferWardenTo !== undefined) {
+      const targetId = String(body.transferWardenTo || '').trim().slice(0, 80);
+      const target = table.players?.[targetId];
+      if (!target) return send(res, 404, { error: 'Target player not found.' });
+      Object.values(table.players || {}).forEach(player => {
+        if (player.role === 'warden') player.role = player.id === targetId ? 'warden' : 'protagonist';
+      });
+      target.role = 'warden';
+      eventType = 'warden.transferred';
+      eventText = `${actor.name || 'Admin'} transferred Warden control to ${target.name || 'a player'}.`;
+    }
+
+    table.rev += 1;
+    table.updatedAt = new Date().toISOString();
+    table.updatedBy = actor.id;
+    addEvent(table, { type: eventType, text: eventText, detail: { locked: table.locked, archived: table.archived, status: table.status } }, actor);
+    data.tables[tableCode] = table;
+    writeTables(data);
+    broadcastTable(tableCode, 'table.managed', table);
+    return send(res, 200, { table: tablePayload(table), summary: tableSummary(table, access.accounts), audit: tableAuditPayload(table) });
+  }
+
   const playerMatch = pathname.match(/^\/api\/tables\/([A-Z0-9]{4,10})\/players(?:\/([^/]+))?$/i);
   if (playerMatch) {
     const tableCode = playerMatch[1].toUpperCase();
@@ -1646,14 +1832,45 @@ async function handleApi(req, res, pathname) {
 
     if (req.method === 'GET') return send(res, 200, { code: table.code, players: tablePayload(table).players });
 
+    if (playerMatch[2] && req.method === 'DELETE') {
+      const access = enforceTableOperation(req, res, tableCode);
+      if (!access) return;
+      const id = decodeURIComponent(playerMatch[2]);
+      const player = table.players?.[id];
+      if (!player) return send(res, 404, { error: 'Player not found.' });
+      const actor = actorPlayer(access.user);
+      delete table.players[id];
+      if (table.flow?.focusClientId === id) {
+        table.flow.focusClientId = '';
+        table.flow.focusName = '';
+      }
+      table.rev += 1;
+      table.updatedAt = new Date().toISOString();
+      table.updatedBy = actor.id;
+      addEvent(table, {
+        type: 'player.kicked',
+        text: `${actor.name || 'Warden'} removed ${player.name || 'a player'} from the table.`,
+        detail: { playerId: id, playerName: player.name || null },
+      }, actor);
+      data.tables[tableCode] = table;
+      writeTables(data);
+      broadcastTable(tableCode, 'player.kicked', table);
+      return send(res, 200, tablePayload(table));
+    }
+
     if (req.method === 'POST' || req.method === 'PATCH') {
       const body = await readBody(req);
       const id = playerMatch[2] ? decodeURIComponent(playerMatch[2]) : body.clientId;
       if (!id) return send(res, 400, { error: 'Player clientId is required' });
+      const previous = table.players[id] || null;
+      const requestedRole = cleanRole(body.role || table.players[id]?.role || 'protagonist');
+      if (table.archived) return send(res, 410, { error: 'This table is archived.' });
+      if (table.locked && !previous && requestedRole !== 'warden') {
+        return send(res, 423, { error: 'This table is locked. Wait for the Warden to reopen joins.', locked: true, table: tablePayload(table) });
+      }
       if (!canUseRole(table, id, body.role || table.players[id]?.role || 'protagonist')) {
         return send(res, 403, { error: 'Only the current Warden can keep the Warden seat.' });
       }
-      const previous = table.players[id] || null;
       const fallbackRole = table.players[id]?.role || body.role || 'protagonist';
       const player = upsertPlayer(table, { ...body, clientId: id || body.clientId }, fallbackRole);
       if (!player) return send(res, 400, { error: 'Player clientId is required' });

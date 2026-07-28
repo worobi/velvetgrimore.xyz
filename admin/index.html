@@ -743,6 +743,16 @@ hr.divider { border: none; border-top: 1px solid var(--border); margin: 24px 0; 
       </div>
       <div id="syncStatus" style="font-size:13px;color:var(--text-dim);line-height:1.7;margin-top:12px;">Remote sync is off.</div>
       <div id="syncLobby" style="display:grid;gap:8px;margin-top:12px;"></div>
+      <div style="border-top:1px solid var(--border);padding-top:12px;margin-top:14px;">
+        <div style="display:flex;justify-content:space-between;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:8px;">
+          <div style="font-family:'Cinzel',serif;color:var(--gold);font-size:12px;letter-spacing:1px;text-transform:uppercase;">Table Control Room</div>
+          <button class="btn btn-ghost btn-sm" onclick="refreshTableDirectory()">Refresh Tables</button>
+        </div>
+        <div id="tableOpsSummary" style="font-size:13px;color:var(--text-dim);line-height:1.6;margin-bottom:8px;">Login as Admin or Warden to manage tables.</div>
+        <div id="tableDirectory" style="display:grid;gap:8px;max-height:280px;overflow:auto;background:rgba(0,0,0,0.18);border:1px solid var(--border);border-radius:6px;padding:10px;"></div>
+        <div style="font-family:'Cinzel',serif;color:var(--gold);font-size:12px;letter-spacing:1px;text-transform:uppercase;margin:10px 0 8px;">Table Audit</div>
+        <div id="tableAuditPanel" style="display:grid;gap:8px;max-height:180px;overflow:auto;background:rgba(0,0,0,0.18);border:1px solid var(--border);border-radius:6px;padding:10px;"></div>
+      </div>
       <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(290px,1fr));gap:12px;margin-top:14px;align-items:start;">
       <div style="border-top:1px solid var(--border);padding-top:12px;">
         <div style="font-family:'Cinzel',serif;color:var(--gold);font-size:12px;letter-spacing:1px;text-transform:uppercase;margin-bottom:8px;">Accounts</div>
@@ -1386,14 +1396,16 @@ function initRemoteSync() {
   renderSyncFlow(cfg.flow || null);
   renderSyncRooms(cfg.rooms || null);
   initAccountAdmin();
+  refreshTableDirectory().catch(() => null);
 }
 
 function updateSyncStatus(status = (window.VGSync ? VGSync.status() : null)) {
   const el = document.getElementById('syncStatus');
   if (!el || !status) return;
   const liveText = status.liveConnected ? 'live updates on' : (status.liveState === 'reconnecting' ? 'live reconnecting' : 'polling fallback');
+  const accessText = `${status.locked ? ' · locked' : ''}${status.archived ? ' · archived' : ''}`;
   const state = status.enabled && status.code
-    ? `Remote sync is on. Table code: ${escHtml(status.code)} · ${escHtml(liveText)} · revision ${status.lastRev || 0} · ${escHtml(status.role || 'warden')}${status.ready ? ' · ready' : ''} · ${status.canWriteSharedState ? 'state control on' : 'view only'}`
+    ? `Remote sync is on. Table code: ${escHtml(status.code)} · ${escHtml(liveText)} · revision ${status.lastRev || 0} · ${escHtml(status.role || 'warden')}${status.ready ? ' · ready' : ''}${accessText} · ${status.canWriteSharedState ? 'state control on' : 'view only'}`
     : 'Remote sync is off.';
   el.innerHTML = status.error
     ? `${state}<br><span style="color:var(--red-bright);">Last error: ${escHtml(status.error)}</span>`
@@ -1407,8 +1419,9 @@ function renderSyncLobby(table = (window.VGSync ? VGSync.status().table : null))
   const el = document.getElementById('syncLobby');
   if (!el) return;
   const players = table?.players || [];
+  const canOperate = window.VGSync && VGSync.status().account && ['owner', 'admin', 'warden'].includes(VGSync.status().account.role);
   if (!players.length) {
-    el.innerHTML = `<div style="font-size:12px;color:var(--text-muted);font-style:italic;">No players seated yet.</div>`;
+    el.innerHTML = `<div style="font-size:12px;color:var(--text-muted);font-style:italic;">No players seated yet.${table?.locked ? ' Table is locked.' : ''}</div>`;
     return;
   }
   el.innerHTML = players.map(player => `
@@ -1418,10 +1431,164 @@ function renderSyncLobby(table = (window.VGSync ? VGSync.status().table : null))
         <span style="color:var(--text-muted);font-size:12px;"> · ${escHtml(player.role || 'protagonist')}</span>
         <span style="color:${player.online ? '#9edc9e' : 'var(--text-muted)'};font-size:12px;"> · ${player.online ? 'online' : `idle ${player.idleSeconds || 0}s`}</span>
       </div>
-      <div style="font-size:12px;color:${player.ready ? 'var(--gold)' : 'var(--text-muted)'};">${player.ready ? 'ready' : 'not ready'}${player.role === 'warden' ? ' · controls state' : ''}</div>
+      <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;justify-content:flex-end;">
+        <div style="font-size:12px;color:${player.ready ? 'var(--gold)' : 'var(--text-muted)'};">${player.ready ? 'ready' : 'not ready'}${player.role === 'warden' ? ' · controls state' : ''}</div>
+        ${canOperate ? `
+          ${player.role !== 'warden' ? `<button class="btn btn-ghost btn-sm" onclick="transferTableWarden('${escHtml(table.code)}','${escHtml(player.id)}')">Make Warden</button>` : ''}
+          <button class="btn btn-ghost btn-sm" onclick="kickTablePlayer('${escHtml(table.code)}','${escHtml(player.id)}')">Remove</button>
+        ` : ''}
+      </div>
     </div>
   `).join('');
   renderSyncFlow(window.VGSync ? VGSync.status() : null);
+}
+
+async function refreshTableDirectory() {
+  if (!window.VGSync) return;
+  const list = document.getElementById('tableDirectory');
+  const summary = document.getElementById('tableOpsSummary');
+  if (!list) return;
+  try {
+    const payload = await VGSync.tableDirectory();
+    renderTableDirectory(payload.tables || []);
+    if (summary) {
+      const tables = payload.tables || [];
+      const active = tables.filter(table => !table.archived);
+      const locked = tables.filter(table => table.locked && !table.archived);
+      summary.textContent = `${active.length} active table${active.length === 1 ? '' : 's'} · ${locked.length} locked · ${tables.filter(table => table.archived).length} archived`;
+    }
+  } catch (err) {
+    list.innerHTML = `<div style="font-size:12px;color:var(--text-muted);font-style:italic;">${escHtml(err.message)}</div>`;
+    if (summary) summary.textContent = 'Login as Admin or Warden to manage tables.';
+  }
+}
+
+function renderTableDirectory(tables = []) {
+  const list = document.getElementById('tableDirectory');
+  if (!list) return;
+  if (!tables.length) {
+    list.innerHTML = `<div style="font-size:12px;color:var(--text-muted);font-style:italic;">No remote tables yet.</div>`;
+    return;
+  }
+  list.innerHTML = tables.map(table => `
+    <div style="border-bottom:1px solid rgba(255,255,255,0.04);padding-bottom:9px;">
+      <div style="display:flex;justify-content:space-between;gap:8px;font-size:12px;color:var(--text-muted);">
+        <span><strong style="color:var(--text);">${escHtml(table.name || 'Velvet Table')}</strong> · ${escHtml(table.code)} · ${escHtml(table.status || 'lobby')}${table.locked ? ' · locked' : ''}${table.archived ? ' · archived' : ''}</span>
+        <span>${table.playerCount || 0} seated · ${table.onlineCount || 0} online</span>
+      </div>
+      <div style="font-size:12px;color:var(--text-muted);margin-top:3px;">Warden: ${escHtml(table.wardenName || 'none')} · Assigned: ${escHtml((table.assignedUsers || []).map(user => user.displayName || user.username).join(', ') || 'manual/admin')}</div>
+      <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:7px;">
+        <button class="btn btn-ghost btn-sm" onclick="selectTableFromDirectory('${escHtml(table.code)}')">Select</button>
+        <button class="btn btn-ghost btn-sm" onclick="renameTableFromDirectory('${escHtml(table.code)}')">Rename</button>
+        <button class="btn btn-ghost btn-sm" onclick="toggleTableLock('${escHtml(table.code)}', ${table.locked ? 'false' : 'true'})">${table.locked ? 'Unlock' : 'Lock'}</button>
+        <button class="btn btn-ghost btn-sm" onclick="toggleTableArchive('${escHtml(table.code)}', ${table.archived ? 'false' : 'true'})">${table.archived ? 'Reopen' : 'Archive'}</button>
+        <button class="btn btn-ghost btn-sm" onclick="loadTableAudit('${escHtml(table.code)}')">Audit</button>
+      </div>
+    </div>
+  `).join('');
+}
+
+async function selectTableFromDirectory(code) {
+  const input = document.getElementById('syncTableCode');
+  if (input) input.value = code;
+  await loadTableAudit(code).catch(() => null);
+  toast(`Selected table ${code}.`, 'success');
+}
+
+async function renameTableFromDirectory(code) {
+  if (!window.VGSync) return;
+  const name = window.prompt('Table name', 'Velvet Table');
+  if (!name) return;
+  try {
+    await VGSync.tableManage(code, { name });
+    await refreshTableDirectory();
+    await loadTableAudit(code).catch(() => null);
+    toast('Table renamed.', 'success');
+  } catch (err) {
+    toast(`Rename failed: ${err.message}`, 'error');
+  }
+}
+
+async function toggleTableLock(code, locked) {
+  if (!window.VGSync) return;
+  try {
+    await VGSync.tableManage(code, { locked: !!locked });
+    await refreshTableDirectory();
+    await loadTableAudit(code).catch(() => null);
+    updateSyncStatus(VGSync.status());
+    toast(locked ? 'Table locked.' : 'Table unlocked.', 'success');
+  } catch (err) {
+    toast(`Lock update failed: ${err.message}`, 'error');
+  }
+}
+
+async function toggleTableArchive(code, archived) {
+  if (!window.VGSync) return;
+  try {
+    await VGSync.tableManage(code, { archived: !!archived });
+    await refreshTableDirectory();
+    await loadTableAudit(code).catch(() => null);
+    updateSyncStatus(VGSync.status());
+    toast(archived ? 'Table archived.' : 'Table reopened.', 'success');
+  } catch (err) {
+    toast(`Archive update failed: ${err.message}`, 'error');
+  }
+}
+
+async function kickTablePlayer(code, playerId) {
+  if (!window.VGSync) return;
+  try {
+    const table = await VGSync.tableKickPlayer(code, playerId);
+    renderSyncLobby(table);
+    await VGSync.fetchEvents(true).catch(() => null);
+    await refreshTableDirectory();
+    await loadTableAudit(code).catch(() => null);
+    toast('Player removed.', 'warn');
+  } catch (err) {
+    toast(`Remove failed: ${err.message}`, 'error');
+  }
+}
+
+async function transferTableWarden(code, playerId) {
+  if (!window.VGSync) return;
+  try {
+    const payload = await VGSync.tableTransferWarden(code, playerId);
+    if (payload.table) renderSyncLobby(payload.table);
+    await VGSync.fetchEvents(true).catch(() => null);
+    await refreshTableDirectory();
+    await loadTableAudit(code).catch(() => null);
+    toast('Warden control transferred.', 'success');
+  } catch (err) {
+    toast(`Transfer failed: ${err.message}`, 'error');
+  }
+}
+
+async function loadTableAudit(code = (window.VGSync ? VGSync.status().code : '')) {
+  if (!window.VGSync) return;
+  const panel = document.getElementById('tableAuditPanel');
+  if (!panel) return;
+  try {
+    const payload = await VGSync.tableAudit(code);
+    const events = payload.events || [];
+    if (!events.length) {
+      panel.innerHTML = `<div style="font-size:12px;color:var(--text-muted);font-style:italic;">No table audit events yet.</div>`;
+      return;
+    }
+    panel.innerHTML = events.slice(0, 40).map(event => {
+      const time = event.createdAt ? new Date(event.createdAt).toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }) : '';
+      return `
+        <div style="border-bottom:1px solid rgba(255,255,255,0.04);padding-bottom:7px;">
+          <div style="display:flex;justify-content:space-between;gap:10px;font-size:12px;color:var(--text-muted);">
+            <span><strong style="color:var(--text);">${escHtml(event.type || 'event')}</strong> · ${escHtml(event.name || 'System')}</span>
+            <span>${escHtml(time)}</span>
+          </div>
+          <div style="font-size:13px;line-height:1.45;color:var(--text-dim);margin-top:3px;">${escHtml(event.text || '')}</div>
+        </div>
+      `;
+    }).join('');
+  } catch (err) {
+    panel.innerHTML = `<div style="font-size:12px;color:var(--text-muted);font-style:italic;">${escHtml(err.message)}</div>`;
+  }
 }
 
 async function initAccountAdmin() {
@@ -1435,6 +1602,7 @@ async function initAccountAdmin() {
       await refreshAccountSettings();
       await refreshAccountUsers();
       await refreshAccountInvites();
+      await refreshTableDirectory();
     }
   } catch (err) {
     const el = document.getElementById('accountStatus');
@@ -1469,6 +1637,7 @@ async function bootstrapOwnerAccount() {
     await refreshAccountSettings();
     await refreshAccountUsers();
     await refreshAccountInvites();
+    await refreshTableDirectory();
     toast('Owner account ready.', 'success');
   } catch (err) {
     toast(`Owner setup failed: ${err.message}`, 'error');
@@ -1486,6 +1655,7 @@ async function loginAccount() {
     await refreshAccountSettings();
     await refreshAccountUsers();
     await refreshAccountInvites();
+    await refreshTableDirectory();
     toast('Logged in.', 'success');
   } catch (err) {
     toast(`Login failed: ${err.message}`, 'error');
@@ -1498,6 +1668,8 @@ async function logoutAccount() {
   document.getElementById('accountUserList').innerHTML = '';
   document.getElementById('accountInviteList').innerHTML = '';
   document.getElementById('accountInviteGenerated').textContent = '';
+  document.getElementById('tableDirectory').innerHTML = '';
+  document.getElementById('tableAuditPanel').innerHTML = '';
   renderAccountAdmin();
   toast('Logged out.', 'warn');
 }
@@ -2169,6 +2341,7 @@ async function createRemoteTable() {
     await VGSync.fetchCheckpoints();
     await VGSync.fetchFlow();
     await VGSync.fetchRooms();
+    await refreshTableDirectory().catch(() => null);
     toast(`Remote table created: ${result.table.code}`, 'success');
     updateSyncStatus(VGSync.status());
   } catch (err) {
@@ -2192,6 +2365,7 @@ async function joinRemoteTable() {
     await VGSync.fetchCheckpoints();
     await VGSync.fetchFlow();
     await VGSync.fetchRooms();
+    await refreshTableDirectory().catch(() => null);
     toast(`Joined remote table: ${result.table.code}`, 'success');
     updateSyncStatus(VGSync.status());
   } catch (err) {
@@ -2210,6 +2384,7 @@ async function refreshLobby() {
     await VGSync.fetchFlow();
     await VGSync.fetchRooms();
     renderSyncLobby(table);
+    await refreshTableDirectory().catch(() => null);
     updateSyncStatus(VGSync.status());
   } catch (err) {
     toast(`Lobby refresh failed: ${err.message}`, 'error');
