@@ -8,6 +8,7 @@ const VGSync = (() => {
   const ACCOUNT_KEY = 'vg_account_session';
   const SYNC_KEYS = [
     'vg_campaigns',
+    'vg_templates',
     'vg_session',
     'vg_maps',
     'vg_active_map_id',
@@ -19,6 +20,7 @@ const VGSync = (() => {
     'vg_intimacy_chat',
     'vg_intimacy_state',
     'vg_intimacy_cards',
+    'vg_player_notes',
   ];
 
   let timer = null;
@@ -36,6 +38,13 @@ const VGSync = (() => {
   let roomState = { rooms: [], messages: [], lastRoomMessageId: 0 };
   let liveStream = null;
   let liveState = 'off';
+  let pendingPush = null;
+
+  function emitStatus() {
+    const state = status();
+    callbacks.onStatus?.(state);
+    window.dispatchEvent(new CustomEvent('vg-sync-status', { detail: state }));
+  }
 
   function uid() {
     return Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
@@ -74,8 +83,8 @@ const VGSync = (() => {
   }
 
   function saveAccountSession(session) {
-    if (!session?.token || !session?.user) localStorage.removeItem(ACCOUNT_KEY);
-    else localStorage.setItem(ACCOUNT_KEY, JSON.stringify(session));
+    if (!session?.user) localStorage.removeItem(ACCOUNT_KEY);
+    else localStorage.setItem(ACCOUNT_KEY, JSON.stringify({ user: session.user }));
     return session;
   }
 
@@ -125,7 +134,7 @@ const VGSync = (() => {
       clientId: account?.id || config.clientId,
       accountId: account?.id || null,
       name: account?.displayName || overrides.name || config.playerName || defaultPlayerName(),
-      role: account ? accountRoleToTableRole(account.role) : syncRoleToTableRole(overrides.role || config.role),
+      role: lastTable?.permissions?.role || (account ? accountRoleToTableRole(account.role) : syncRoleToTableRole(overrides.role || config.role)),
       ready: overrides.ready === undefined ? !!config.ready : !!overrides.ready,
     };
   }
@@ -133,20 +142,27 @@ const VGSync = (() => {
   function canWriteSharedState() {
     const config = getConfig();
     const account = getAccountSession()?.user || null;
+    if (lastTable?.permissions) return !!lastTable.permissions.canWriteSharedState;
     if (account) return ['owner', 'admin', 'warden'].includes(account.role);
     return syncRoleToTableRole(config.role) === 'warden';
   }
 
   function fingerprint(snap = snapshot()) {
-    return JSON.stringify(snap.keys || {});
+    const keys = snap.keys || {};
+    return JSON.stringify(Object.fromEntries(['vg_campaigns', 'vg_templates', 'vg_session', 'vg_maps', 'vg_active_map_id'].map(key => [key, keys[key] ?? null])));
   }
 
-  function applySnapshot(snap) {
+  function applySnapshot(snap, all = false) {
     if (!snap || !snap.keys) return;
     SYNC_KEYS.forEach(key => {
+      if (!all && canWriteSharedState() && snap.changedKeys?.length && !snap.changedKeys.includes(key) && !['vg_threshold_current', 'vg_thresholds', 'vg_hearths', 'vg_stations_done', 'vg_player_notes', 'vg_intimacy_cards'].includes(key)) return;
       const value = snap.keys[key];
       if (value == null) localStorage.removeItem(key);
       else localStorage.setItem(key, value);
+      if (key === 'vg_player_notes') {
+        Object.keys(localStorage).filter(k => k.startsWith('npc_response_')).forEach(k => localStorage.removeItem(k));
+        try { for (const [sceneId, note] of Object.entries(JSON.parse(value || '{}'))) localStorage.setItem(`npc_response_${sceneId}`, note); } catch {}
+      }
     });
     callbacks.onApply?.(snap);
     window.dispatchEvent(new CustomEvent('vg-sync-applied', { detail: snap }));
@@ -157,6 +173,7 @@ const VGSync = (() => {
     const account = getAccountSession();
     const res = await fetch(`${config.apiBase}${path}`, {
       ...options,
+      credentials: 'same-origin',
       headers: {
         'Content-Type': 'application/json',
         ...(account?.token ? { Authorization: `Bearer ${account.token}` } : {}),
@@ -168,6 +185,14 @@ const VGSync = (() => {
       const err = new Error(body.error || `Sync request failed (${res.status})`);
       err.status = res.status;
       err.body = body;
+      if (res.status === 401 && !path.startsWith('/api/accounts/')) {
+        stop(); saveAccountSession(null);
+        if (!['/', '/index.html', '/login'].includes(location.pathname)) location.assign('/?session=expired');
+      }
+      if (res.status === 403 && body.accessDenied) {
+        stop(); SYNC_KEYS.forEach(key => localStorage.removeItem(key)); lastTable = null;
+        if (!['/', '/index.html', '/members.html'].includes(location.pathname)) location.assign('/members.html');
+      }
       throw err;
     }
     return body;
@@ -195,9 +220,13 @@ const VGSync = (() => {
   function applyLivePayload(payload = {}) {
     const config = getConfig();
     if (payload.table) {
+      const previousPermission = lastTable?.permissions;
       lastTable = payload.table;
+      const permissionChanged = previousPermission && (previousPermission.role !== payload.table.permissions?.role || previousPermission.canWriteSharedState !== payload.table.permissions?.canWriteSharedState);
+      if (permissionChanged) { applySnapshot(payload.table.snapshot, true); lastFingerprint = fingerprint(payload.table.snapshot); }
       if (payload.table.rev > (config.lastRev || 0)) {
-        if (payload.table.updatedBy !== effectiveClientId(config)) {
+        const serverChanges = payload.table.snapshot?.changedKeys?.length && payload.table.snapshot.changedKeys.every(key => !['vg_campaigns', 'vg_templates', 'vg_session', 'vg_maps', 'vg_active_map_id'].includes(key));
+        if (payload.table.updatedBy !== effectiveClientId(config) || serverChanges) {
           applySnapshot(payload.table.snapshot);
           lastFingerprint = fingerprint(payload.table.snapshot);
         }
@@ -236,7 +265,7 @@ const VGSync = (() => {
       callbacks.onRooms?.(roomState);
     }
     callbacks.onLive?.({ state: liveState, reason: payload.reason || 'sync', sentAt: payload.sentAt || null });
-    callbacks.onStatus?.(status());
+    emitStatus();
   }
 
   function streamUrl(config = getConfig()) {
@@ -247,7 +276,6 @@ const VGSync = (() => {
     url.searchParams.set('role', syncRoleToTableRole(config.role));
     url.searchParams.set('lastMessageId', String(lastMessageId || 0));
     url.searchParams.set('lastEventId', String(lastEventId || 0));
-    if (account?.token) url.searchParams.set('token', account.token);
     if (canWriteSharedState()) url.searchParams.set('pending', '1');
     return url.toString();
   }
@@ -262,7 +290,7 @@ const VGSync = (() => {
     const config = getConfig();
     if (!config.enabled || !config.code || typeof EventSource === 'undefined') {
       closeLiveStream();
-      callbacks.onStatus?.(status());
+      emitStatus();
       return;
     }
     if (liveStream) liveStream.close();
@@ -271,7 +299,7 @@ const VGSync = (() => {
     liveStream.addEventListener('open', () => {
       liveState = 'live';
       callbacks.onLive?.({ state: liveState, reason: 'connected' });
-      callbacks.onStatus?.(status());
+      emitStatus();
     });
     liveStream.addEventListener('sync', event => {
       liveState = 'live';
@@ -284,7 +312,7 @@ const VGSync = (() => {
     liveStream.addEventListener('error', () => {
       liveState = 'reconnecting';
       callbacks.onLive?.({ state: liveState, reason: 'stream-error' });
-      callbacks.onStatus?.(status());
+      emitStatus();
     });
   }
 
@@ -313,7 +341,7 @@ const VGSync = (() => {
     const next = saveConfig({ ...config, enabled: true, code: table.code, lastRev: table.rev, role: 'warden', ready: true });
     lastFingerprint = fingerprint(local);
     start(callbacks);
-    callbacks.onStatus?.(status());
+    emitStatus();
     return { table, config: next };
   }
 
@@ -322,14 +350,14 @@ const VGSync = (() => {
     const normalized = String(code || '').trim().toUpperCase();
     if (!normalized) throw new Error('Enter a table code.');
     const table = await request(`/api/tables/${normalized}`);
-    applySnapshot(table.snapshot);
-    const role = options.role || syncRoleToTableRole(config.role);
+    const role = table.permissions?.role || options.role || syncRoleToTableRole(config.role);
     const playerName = options.name || config.playerName || defaultPlayerName();
     const joined = await request(`/api/tables/${normalized}/players`, {
       method: 'POST',
-      body: JSON.stringify(playerPayload({ name: playerName, role, ready: !!options.ready })),
+      body: JSON.stringify({ clientId: effectiveClientId(config), ready: !!options.ready }),
     });
     lastTable = joined;
+    applySnapshot(joined.snapshot, true);
     messages = [];
     lastMessageId = 0;
     events = [];
@@ -346,9 +374,9 @@ const VGSync = (() => {
       playerName,
       ready: !!options.ready,
     });
-    lastFingerprint = fingerprint(table.snapshot);
+    lastFingerprint = fingerprint(joined.snapshot);
     start(callbacks);
-    callbacks.onStatus?.(status());
+    emitStatus();
     return { table: joined, config: next };
   }
 
@@ -358,7 +386,7 @@ const VGSync = (() => {
     const table = await request(`/api/tables/${config.code}`);
     lastTable = table;
     callbacks.onLobby?.(table);
-    callbacks.onStatus?.(status());
+    emitStatus();
     return table;
   }
 
@@ -373,7 +401,7 @@ const VGSync = (() => {
     });
     lastTable = table;
     callbacks.onLobby?.(table);
-    callbacks.onStatus?.(status());
+    emitStatus();
     return table;
   }
 
@@ -384,7 +412,7 @@ const VGSync = (() => {
     if (force) messages = [];
     mergeMessages(payload.messages || [], payload.lastMessageId || 0);
     callbacks.onChat?.(messages);
-    callbacks.onStatus?.(status());
+    emitStatus();
     return messages;
   }
 
@@ -402,7 +430,7 @@ const VGSync = (() => {
     mergeMessages(incoming, payload.lastMessageId || 0);
     lastMessageId = Math.max(lastMessageId, payload.lastMessageId || 0, payload.message?.id || 0);
     callbacks.onChat?.(messages);
-    callbacks.onStatus?.(status());
+    emitStatus();
     return payload.message;
   }
 
@@ -415,7 +443,7 @@ const VGSync = (() => {
     if (force) events = [];
     mergeEvents(payload.events || [], payload.lastEventId || 0);
     callbacks.onEvents?.(events);
-    callbacks.onStatus?.(status());
+    emitStatus();
     return events;
   }
 
@@ -432,6 +460,7 @@ const VGSync = (() => {
         player: playerPayload(),
       }),
     });
+    if (payload.table) applyLivePayload({ table: payload.table });
     const previousLastEventId = lastEventId;
     const incoming = payload.events || [];
     mergeEvents(incoming, payload.lastEventId || 0);
@@ -444,7 +473,7 @@ const VGSync = (() => {
       lastEventId = Math.max(lastEventId, payload.lastEventId || 0, payload.event?.id || 0);
     }
     callbacks.onEvents?.(events);
-    callbacks.onStatus?.(status());
+    emitStatus();
     return payload.event;
   }
 
@@ -462,7 +491,7 @@ const VGSync = (() => {
     mergeEvents(incoming, payload.lastEventId || 0);
     if (canWriteSharedState()) await fetchCheckpoints().catch(() => checkpoints);
     callbacks.onEvents?.(events);
-    callbacks.onStatus?.(status());
+    emitStatus();
     return payload.event;
   }
 
@@ -481,7 +510,7 @@ const VGSync = (() => {
     });
     mergeEvents(payload.events || [], payload.lastEventId || 0);
     callbacks.onEvents?.(events);
-    callbacks.onStatus?.(status());
+    emitStatus();
     return payload.event;
   }
 
@@ -491,7 +520,7 @@ const VGSync = (() => {
     const payload = await request(`/api/tables/${config.code}/checkpoints`);
     checkpoints = payload.checkpoints || [];
     callbacks.onCheckpoints?.(checkpoints);
-    callbacks.onStatus?.(status());
+    emitStatus();
     return checkpoints;
   }
 
@@ -510,7 +539,7 @@ const VGSync = (() => {
     });
     checkpoints = payload.checkpoints || [];
     callbacks.onCheckpoints?.(checkpoints);
-    callbacks.onStatus?.(status());
+    emitStatus();
     return payload.checkpoint;
   }
 
@@ -534,7 +563,7 @@ const VGSync = (() => {
       callbacks.onLobby?.(payload.table);
     }
     callbacks.onCheckpoints?.(checkpoints);
-    callbacks.onStatus?.(status());
+    emitStatus();
     return payload.table || null;
   }
 
@@ -548,7 +577,7 @@ const VGSync = (() => {
     });
     checkpoints = payload.checkpoints || [];
     callbacks.onCheckpoints?.(checkpoints);
-    callbacks.onStatus?.(status());
+    emitStatus();
     return checkpoints;
   }
 
@@ -561,7 +590,7 @@ const VGSync = (() => {
       lastHandoutId: payload.lastHandoutId || 0,
     };
     callbacks.onFlow?.(flowState);
-    callbacks.onStatus?.(status());
+    emitStatus();
     return flowState;
   }
 
@@ -655,7 +684,7 @@ const VGSync = (() => {
       lastRoomMessageId: payload.lastRoomMessageId || 0,
     };
     callbacks.onRooms?.(roomState);
-    callbacks.onStatus?.(status());
+    emitStatus();
     return roomState;
   }
 
@@ -736,25 +765,29 @@ const VGSync = (() => {
     });
     callbacks.onAccount?.(payload.user);
     if (config.enabled && config.code) openLiveStream();
-    callbacks.onStatus?.(status());
+    emitStatus();
     return payload;
   }
 
   async function accountLogout() {
+    if (getConfig().enabled && canWriteSharedState()) await flush();
     await request('/api/accounts/logout', { method: 'POST' }).catch(() => null);
+    stop();
+    SYNC_KEYS.forEach(key => localStorage.removeItem(key));
+    Object.keys(localStorage).filter(key => key.startsWith('npc_response_')).forEach(key => localStorage.removeItem(key));
+    lastTable = null; messages = []; events = []; checkpoints = []; lastFingerprint = '';
     saveAccountSession(null);
     callbacks.onAccount?.(null);
     const config = getConfig();
-    if (config.enabled && config.code) openLiveStream();
-    callbacks.onStatus?.(status());
+    emitStatus();
   }
 
   async function accountMe() {
     const payload = await request('/api/accounts/me');
     const session = getAccountSession();
-    if (session?.token) saveAccountSession({ token: session.token, user: payload.user });
+    saveAccountSession({ user: payload.user });
     callbacks.onAccount?.(payload.user);
-    callbacks.onStatus?.(status());
+    emitStatus();
     return payload.user;
   }
 
@@ -803,9 +836,7 @@ const VGSync = (() => {
       body: JSON.stringify(updates),
     });
     if (payload.table && normalized === getConfig().code) {
-      lastTable = payload.table;
-      callbacks.onLobby?.(payload.table);
-      callbacks.onStatus?.(status());
+      applyLivePayload({ table: payload.table });
     }
     return payload;
   }
@@ -826,7 +857,7 @@ const VGSync = (() => {
     if (normalized === getConfig().code) {
       lastTable = table;
       callbacks.onLobby?.(table);
-      callbacks.onStatus?.(status());
+      emitStatus();
     }
     return table;
   }
@@ -866,7 +897,7 @@ const VGSync = (() => {
       role: accountRoleToTableRole(payload.user?.role || config.role),
     });
     callbacks.onAccount?.(payload.user);
-    callbacks.onStatus?.(status());
+    emitStatus();
     return payload;
   }
 
@@ -897,7 +928,7 @@ const VGSync = (() => {
     });
     lastTable = table;
     callbacks.onLobby?.(table);
-    callbacks.onStatus?.(status());
+    emitStatus();
     if (roleChanged) openLiveStream();
     return table;
   }
@@ -918,11 +949,26 @@ const VGSync = (() => {
       }
       saveConfig({ ...config, lastRev: table.rev });
     }
-    callbacks.onStatus?.(status());
+    emitStatus();
     return table;
   }
 
   async function push() {
+    if (pendingPush) return pendingPush;
+    pendingPush = pushCurrent();
+    try { return await pendingPush; } finally { pendingPush = null; }
+  }
+
+  async function flush() {
+    if (!getConfig().enabled || !canWriteSharedState()) return;
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      await push();
+      if (fingerprint() === lastFingerprint) return;
+    }
+    throw new Error('The latest changes are still saving. Please try again.');
+  }
+
+  async function pushCurrent() {
     const config = getConfig();
     if (!config.enabled || !config.code) return null;
     if (!canWriteSharedState()) return null;
@@ -943,7 +989,7 @@ const VGSync = (() => {
     saveConfig({ ...config, lastRev: table.rev });
     lastFingerprint = current;
     await fetchCheckpoints().catch(() => checkpoints);
-    callbacks.onStatus?.(status());
+    emitStatus();
     return table;
   }
 
@@ -980,7 +1026,7 @@ const VGSync = (() => {
     } else {
       closeLiveStream();
     }
-    callbacks.onStatus?.(status());
+    emitStatus();
   }
 
   function stop() {
@@ -989,7 +1035,7 @@ const VGSync = (() => {
     closeLiveStream();
     const config = getConfig();
     saveConfig({ ...config, enabled: false });
-    callbacks.onStatus?.(status());
+    emitStatus();
   }
 
   function status() {
@@ -1002,7 +1048,7 @@ const VGSync = (() => {
       lastRev: config.lastRev || 0,
       clientId: effectiveClientId(config),
       playerName: account?.displayName || config.playerName || defaultPlayerName(),
-      role: account ? accountRoleToTableRole(account.role) : syncRoleToTableRole(config.role || localStorage.getItem('vg_role')),
+      role: lastTable?.permissions?.role || (account ? accountRoleToTableRole(account.role) : syncRoleToTableRole(config.role || localStorage.getItem('vg_role'))),
       account,
       ready: !!config.ready,
       canWriteSharedState: canWriteSharedState(),
@@ -1029,7 +1075,7 @@ const VGSync = (() => {
 
   function setApiBase(apiBase) {
     const config = getConfig();
-    return saveConfig({ ...config, apiBase: String(apiBase || location.origin).trim() || location.origin });
+    return saveConfig({ ...config, apiBase: location.origin });
   }
 
   return {
@@ -1087,6 +1133,7 @@ const VGSync = (() => {
     setReady,
     pull,
     push,
+    flush,
     tick,
     start,
     stop,

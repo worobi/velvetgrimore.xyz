@@ -1,130 +1,30 @@
-VELVET GRIMOIRE DEPLOY NOTES
+VELVET GRIMOIRE - MEMBERS DEPLOYMENT
 
-This folder can run two ways:
+The authoritative source is the app/ Git checkout, repository worobi/velvetgrimore.xyz, main branch.
+The parent deploy/ and web/ folders are historical static releases. Do not copy them into the members app.
 
-1. Static-only mode: HTML/CSS/JS with browser-local state.
-2. VPS backend mode: one Node service hosts the files and provides /api table-code sync.
+Required Coolify settings:
+- Dockerfile build from repository root
+- Port 8080
+- HTTPS at velvetgrimore.xyz; www redirects to the canonical hostname
+- Persistent host storage /data/velvet-grimoire mounted at /data
+- Volume owned by container user UID/GID 1000
+- Health check GET /api/health on port 8080, expecting 200
 
-STATIC HOSTING
-Upload the entire folder contents to your web root.
+Initial migration:
+1. Back up the live container's /data directory and validate both legacy JSON files.
+2. Prepare the new image before stopping the old app.
+3. Stop writes on the old app and take a final data copy.
+4. Copy that data to the protected host volume and set ownership to 1000:1000.
+5. Deploy the reviewed full Git commit through Coolify.
+6. Verify health, login, no anonymous table access, the persistent mount, account/table counts, and a database backup.
 
-Required paths:
-- /index.html
-- /admin/index.html
-- /player/player.html
-- /map/dm-map.html
-- /map/player-map.html
-- /dice/index.html
-- /engine/engine.js
-- /engine/map-engine.js
-- /engine/intimacy.js
-- /engine/sync.js
-- /demo/demo-data.js
-- /server.js
-- /package.json
-- /deploy/velvetgrimore.service
-- /deploy/nginx-velvetgrimore.conf
-- /pause.html
-- /compact/SAFETY.md
-- /compact/TAGS.md
-- /velvet-grimoire-cliff-notes.docx
+The app imports legacy files once into /data/velvet.sqlite. Saved files remain outside the web root. Never remove or replace the persistent volume during a routine deployment.
 
-LOCAL TEST
-You can open index.html directly, but a local server is better because the app uses absolute paths such as /pause.html.
+The repository includes deploy/coolify-members.php for this application's one-time configuration and deployment through the installed Coolify framework. It requires the exact reviewed 40-character Git commit. Run it only after preparing the data mount.
 
-Backend local test:
+Invitation email:
+The owner signs in and opens Member Administration, then connects the existing Spacemail mailbox. No real invitation can be sent until this succeeds. No SMTP password belongs in source control or chat.
 
-  node server.js
-
-Then open:
-
-  http://localhost:8765/
-
-REMOTE MULTIPLAYER ON VPS
-
-Coolify:
-
-  Deploy this repo as a Dockerfile app.
-  Container port: 80
-  Persistent storage: mount a volume at /data
-  Public domains: velvetgrimore.xyz, www.velvetgrimore.xyz, vg.highfunctioningchaos.living
-  Current host: 159.198.39.151
-  SSH port for server maintenance: 22022
-  Coolify app label: coolify.resourceName=velvet-grimore
-
-The included Dockerfile runs:
-
-  node server.js
-
-with PORT=80 inside the container.
-Table data is written to DATA_DIR, which defaults to /data in the Docker image.
-
-Current production routing is Coolify/Traefik -> the app container -> node server.js.
-This GitHub repo is the source of truth for future Coolify rebuilds.
-
-Direct VPS:
-
-Copy this entire folder to:
-
-  /var/www/velvetgrimore
-
-Install Node.js 18+ on the VPS if needed.
-
-Install the service:
-
-  cp deploy/velvetgrimore.service /etc/systemd/system/velvetgrimore.service
-  systemctl daemon-reload
-  systemctl enable --now velvetgrimore
-
-Check it:
-
-  systemctl status velvetgrimore
-  curl http://127.0.0.1:8765/api/health
-
-Nginx:
-
-Use deploy/nginx-velvetgrimore.conf as the base server block, or add this location to the existing site:
-
-  location / {
-      proxy_pass http://127.0.0.1:8765;
-      proxy_http_version 1.1;
-      proxy_set_header Host $host;
-      proxy_set_header X-Real-IP $remote_addr;
-      proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-      proxy_set_header X-Forwarded-Proto $scheme;
-  }
-
-Reload nginx after config test:
-
-  nginx -t
-  systemctl reload nginx
-
-In the app:
-
-1. Open Admin -> Settings -> Remote Multiplayer.
-2. Leave Backend URL as the site URL.
-3. Click Create.
-4. Share the table code with the player.
-5. Player opens /player/player.html, enters their table name and role, then joins.
-6. Use the lobby roster to confirm each seated player is online and ready.
-7. The Warden seat controls shared table state; player and spectator seats receive updates but cannot overwrite the shared snapshot.
-8. Use Table Chat for table-scoped messages between connected users.
-9. Use the Activity Feed to watch live rolls, ready changes, scene changes, safety signals, map reveals, Intimate Table events, and approval items.
-10. Use the Warden Action Queue to approve and apply player movement, map reveal, and scene branch requests.
-11. Use the Session Timeline to filter, bookmark, and export Markdown or HTML recaps after play.
-12. Use Admin -> Live Table as the Warden command center for remote multiplayer.
-13. Player View shows each player's live table status and personal request tracker.
-
-DATA MODEL
-All app data is browser-local unless a Discord webhook is configured.
-The Intimate Table layer stores scene chat, consent ceiling, heat, and want/boundary cards in browser storage.
-In VPS backend mode, synced table snapshots, lobby player records, table chat, and the per-table event log are also stored on the VPS in DATA_DIR/tables.json.
-Multiplayer includes Warden and Player live table dashboards, online/idle presence, Warden-only shared-state writes, table chat messages, a server event log, live server-push updates with event-ID polling fallback, player action submissions, a Warden approval lane, approval-to-apply for movement/map/scene requests, personal request tracking, and session timeline exports.
-
-Before real play:
-1. Open Admin -> Settings -> Backup Everything.
-2. Save the exported JSON somewhere safe.
-3. Repeat after each major campaign-editing session.
-
-DISCORD
-Discord webhook integration is optional. If enabled, selected events are sent to Discord.
+Backups:
+Run node scripts/backup.js inside the app container. It writes a consistent database backup and mail.key under /data/backups. The supplied host wrapper can be run nightly through cron. Keep off-host copies separately for whole-server recovery.

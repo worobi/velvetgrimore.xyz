@@ -1,0 +1,7 @@
+:root{--member-bar-height:56px}
+body.has-member-bar{padding-top:var(--member-bar-height)!important}
+body.has-member-bar .sidebar{top:var(--member-bar-height);min-height:calc(100vh - var(--member-bar-height))}
+body.has-member-bar a[href^="/pause.html"][style*="position:fixed"]{top:calc(var(--member-bar-height) + 14px)!important}
+.member-bar{position:fixed;top:0;left:0;right:0;z-index:1000;min-height:56px;background:#171518;border-bottom:1px solid #68535d;padding:9px 16px;display:flex;gap:12px;align-items:center;justify-content:space-between;flex-wrap:wrap;font:13px/1.4 system-ui,sans-serif;letter-spacing:0;color:#f3eced;box-sizing:border-box}
+.member-bar *{letter-spacing:0;box-sizing:border-box}.member-bar .actions{display:flex;gap:8px;flex-wrap:wrap;align-items:center}.member-bar a{color:#e0c89c;white-space:nowrap;text-underline-offset:4px}.member-bar button{font:inherit;border:1px solid #75626c;background:#292227;color:#f3eced;border-radius:4px;padding:7px 11px;min-height:34px;cursor:pointer}.member-bar button:disabled{opacity:.5}.member-bar .save-status{color:#a8d3bc;overflow-wrap:anywhere}.member-bar :focus-visible{outline:3px solid #e0c89c;outline-offset:3px}
+@media(max-width:640px){.member-bar .actions{width:100%}.member-bar{gap:7px}.member-bar .save-status{font-size:12px}}

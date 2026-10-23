@@ -999,6 +999,7 @@ blockquote {
 <div class="toast" id="toast"></div>
 
 <script src="engine/sync.js"></script>
+<script src="/engine/member-bar.js"></script>
 <script>
 // ── Tab switching ─────────────────────────────────────────────────
 function showTab(name) {
@@ -1043,7 +1044,7 @@ function toggleOffer(opt) {
 }
 
 // ── Threshold save/load ───────────────────────────────────────────
-function saveThreshold() {
+async function saveThreshold() {
   const data = {
     playerName: document.getElementById('thPlayerName').value.trim(),
     playerRole: document.getElementById('thPlayerRole').value,
@@ -1060,12 +1061,8 @@ function saveThreshold() {
     aftercare: [...selectedAftercare],
     sealedAt: new Date().toISOString(),
   };
-  try {
-    const existing = JSON.parse(localStorage.getItem('vg_thresholds') || '[]');
-    existing.push(data);
-    localStorage.setItem('vg_thresholds', JSON.stringify(existing.slice(-20)));
-    localStorage.setItem('vg_threshold_current', JSON.stringify(data));
-  } catch (e) {}
+  if (!window.VGSync?.getConfig().enabled) { toast('Choose your table before saving a check-in.'); return; }
+  try { await VGSync.recordEvent('safety.threshold', { threshold: data }); } catch (error) { toast(error.message); return; }
   renderThresholdSummary(data);
   toast('The Threshold is sealed.');
 }
@@ -1075,7 +1072,7 @@ function renderThresholdSummary(data) {
   const bw = data.bandwidth;
   const bwLabel = bw <= 3 ? 'candle-stub' : bw <= 6 ? 'lantern' : bw <= 8 ? 'hearth-fire' : 'bonfire';
   body.innerHTML = `
-    <p style="margin-bottom:12px;"><strong style="color:var(--gold);font-family:'Cinzel',serif;letter-spacing:2px;">${data.playerName || 'The Player'}</strong> — ${data.playerRole.toUpperCase()}</p>
+    <p style="margin-bottom:12px;"><strong style="color:var(--gold);font-family:'Cinzel',serif;letter-spacing:2px;">${escapeHtml(data.playerName || 'The Player')}</strong> — ${escapeHtml(String(data.playerRole || 'player').toUpperCase())}</p>
     <p style="font-size:14px;color:var(--text-dim);"><strong style="color:var(--text);">Bandwidth:</strong> ${bw}/10 (${bwLabel})</p>
     <p style="font-size:14px;color:var(--text-dim);"><strong style="color:var(--text);">Body:</strong> tension ${data.body.tension} · fatigue ${data.body.fatigue} · hunger ${data.body.hunger} · pain ${data.body.pain}</p>
     ${data.green ? `<p style="margin-top:10px;font-size:14px;"><strong style="color:#9edc9e;font-family:'Cinzel',serif;letter-spacing:1px;">GREEN —</strong> <em style="color:var(--text-dim);">${escapeHtml(data.green)}</em></p>` : ''}
@@ -1104,22 +1101,10 @@ function clearThreshold() {
 }
 
 // ── Ember signals ─────────────────────────────────────────────────
-function sendSignal(tier) {
-  const entry = { tier, at: new Date().toISOString() };
-  try {
-    const log = JSON.parse(localStorage.getItem('vg_signals') || '[]');
-    log.push(entry);
-    localStorage.setItem('vg_signals', JSON.stringify(log.slice(-50)));
-  } catch(e) {}
+async function sendSignal(tier) {
+  if (!window.VGSync?.getConfig().enabled) { toast('Choose your table before sending a signal.'); return; }
+  try { await VGSync.recordEvent('safety.signal', { tier }); } catch (error) { toast(error.message); return; }
   renderSignalLog();
-  if (window.VGSync) {
-    const cfg = VGSync.getConfig();
-    if (cfg.enabled && cfg.code) {
-      VGSync.recordEvent('safety.signal', { tier }, {
-        text: `${cfg.playerName || 'Someone'} raised ${tier}.`
-      }).catch(err => console.warn('Event feed update failed:', err.message));
-    }
-  }
   const labels = {
     dim: '🟡 Dim — softer on this beat',
     hold: '🟠 Hold — pause, breath',
@@ -1195,7 +1180,7 @@ function toggleStation(i) {
   renderStations();
 }
 
-function sealHearth() {
+async function sealHearth() {
   const data = {
     post: {
       tension: +document.getElementById('postTension').value,
@@ -1210,11 +1195,8 @@ function sealHearth() {
     notes: document.getElementById('offerNotes').value.trim(),
     sealedAt: new Date().toISOString(),
   };
-  try {
-    const existing = JSON.parse(localStorage.getItem('vg_hearths') || '[]');
-    existing.push(data);
-    localStorage.setItem('vg_hearths', JSON.stringify(existing.slice(-20)));
-  } catch(e) {}
+  if (!window.VGSync?.getConfig().enabled) { toast('Choose your table before saving the Hearth.'); return; }
+  try { await VGSync.recordEvent('safety.hearth', { hearth: data }); } catch (error) { toast(error.message); return; }
   // Clear stations so the next session starts fresh
   localStorage.removeItem('vg_stations_done');
   renderStations();

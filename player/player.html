@@ -350,41 +350,14 @@ textarea.npc-response:focus { border-color: var(--border-hot); }
 <div class="container">
   <div class="header">
     <div class="header-eyebrow">✦ Velvet Grimoire ✦</div>
-    <h1 class="header-title">NPC Player View</h1>
+    <h1 class="header-title">Player Table</h1>
     <p class="header-role">You are the scene's counterpart. React. Resist. Reveal.</p>
   </div>
 
   <div id="mainContent"></div>
   <div class="remote-join" id="playerRemoteChatDock" style="margin-top:22px;">
     <div style="font-family:'Cinzel',serif;color:var(--gold);font-size:14px;letter-spacing:1px;margin-bottom:6px;">Live Table</div>
-    <div style="display:grid;gap:8px;margin-bottom:12px;background:rgba(0,0,0,0.18);border:1px solid var(--border);border-radius:6px;padding:10px;">
-      <div id="playerAccountStatus" style="font-size:13px;color:var(--text-muted);">Not logged in.</div>
-      <div class="remote-join-row">
-        <input type="text" id="playerAccountUsername" placeholder="Username">
-        <input type="password" id="playerAccountPassword" placeholder="Password" onkeydown="if(event.key==='Enter') playerAccountLogin()">
-        <button class="btn btn-purple" onclick="playerAccountLogin()">Login</button>
-        <button class="btn btn-ghost" onclick="playerAccountLogout()">Logout</button>
-      </div>
-      <div class="remote-join-row">
-        <select id="playerAssignedTable" style="background:rgba(255,255,255,0.035);border:1px solid var(--border);border-radius:4px;padding:10px 12px;color:var(--text);">
-          <option value="">No assigned tables</option>
-        </select>
-        <button class="btn btn-purple" onclick="playerJoinAssignedTable()">Join Assigned</button>
-      </div>
-      <div style="display:grid;gap:8px;border-top:1px solid var(--border);padding-top:10px;">
-        <div style="font-family:'Cinzel',serif;color:var(--gold);font-size:12px;letter-spacing:1px;text-transform:uppercase;">Accept Invite</div>
-        <div class="remote-join-row">
-          <input type="text" id="playerInviteCode" placeholder="Invite code">
-          <input type="text" id="playerInviteName" placeholder="Display name">
-        </div>
-        <div class="remote-join-row">
-          <input type="text" id="playerInviteUsername" placeholder="Username">
-          <input type="password" id="playerInvitePassword" placeholder="Password, optional" onkeydown="if(event.key==='Enter') playerAcceptInvite()">
-          <button class="btn btn-purple" onclick="playerAcceptInvite()">Accept</button>
-        </div>
-        <div id="playerInviteResult" style="font-size:13px;color:var(--gold);line-height:1.5;"></div>
-      </div>
-    </div>
+    <p><a href="/members.html">Your saved tables</a></p>
     <div id="playerSyncStatus" style="font-size:13px;color:var(--text-muted);margin-bottom:10px;"></div>
     <div class="summary-grid" style="margin-bottom:12px;">
       <div class="summary-card">
@@ -472,6 +445,7 @@ textarea.npc-response:focus { border-color: var(--border-hot); }
 <script src="../engine/engine.js"></script>
 <script src="../engine/intimacy.js"></script>
 <script src="../engine/sync.js"></script>
+<script src="/engine/member-bar.js"></script>
 <script>
 
 let showHistory = false;
@@ -1405,12 +1379,15 @@ function loadNPCResponse(sceneId) {
   return localStorage.getItem('npc_response_' + sceneId) || '';
 }
 
-function saveNPCResponse(sceneId) {
+async function saveNPCResponse(sceneId) {
   if (activeSafetySignal?.tier === 'hold') {
     showToast('Hold is active. Writing is paused for now.');
     return;
   }
   const text = document.getElementById('npcResponseText')?.value || '';
+  if (window.VGSync?.getConfig().enabled) {
+    try { await VGSync.recordEvent('note.added', { action: 'scene-note', note: text }); } catch (error) { showToast(error.message); return; }
+  }
   localStorage.setItem('npc_response_' + sceneId, text);
   const scene = VGEngine.getCurrentScene();
   recordPlayerEvent('note.added', {
@@ -1423,10 +1400,13 @@ function saveNPCResponse(sceneId) {
   showToast('Response saved!');
 }
 
-function clearNPCResponse(sceneId) {
+async function clearNPCResponse(sceneId) {
   if (activeSafetySignal?.tier === 'hold') {
     showToast('Hold is active. Writing is paused for now.');
     return;
+  }
+  if (window.VGSync?.getConfig().enabled) {
+    try { await VGSync.recordEvent('note.added', { action: 'scene-note', note: '' }); } catch (error) { showToast(error.message); return; }
   }
   localStorage.removeItem('npc_response_' + sceneId);
   const el = document.getElementById('npcResponseText');
@@ -1504,7 +1484,7 @@ function renderIntimacyPanel(role, session, scene, holdActive) {
         </div>
         <div>
           <label>Heat / tension</label>
-          <input type="range" min="0" max="100" value="${state.heat}" oninput="setIntimacyHeat(this.value)" ${holdActive ? 'disabled' : ''}>
+          <input type="range" min="0" max="100" value="${state.heat}" onchange="setIntimacyHeat(this.value)" ${holdActive ? 'disabled' : ''}>
           <div class="heat-track"><div class="heat-fill" style="width:${state.heat}%"></div></div>
         </div>
       </div>
@@ -1571,18 +1551,18 @@ function getIntimacyContext() {
   return { session, scene };
 }
 
-function setIntimacyConsent(role, level) {
+async function setIntimacyConsent(role, level) {
   const ctx = getIntimacyContext();
   if (!ctx || !window.VGIntimacy) return;
-  VGIntimacy.setConsent(ctx.session.id, ctx.scene.id, role, level);
+  try { await VGIntimacy.setConsent(ctx.session.id, ctx.scene.id, role, level); } catch (error) { showToast(error.message); return; }
   if (level === 'veil') showToast('Veil selected. Turn the camera away or move to Hearth.');
   refreshView();
 }
 
-function setIntimacyHeat(value) {
+async function setIntimacyHeat(value) {
   const ctx = getIntimacyContext();
   if (!ctx || !window.VGIntimacy) return;
-  VGIntimacy.setHeat(ctx.session.id, ctx.scene.id, value);
+  try { await VGIntimacy.setHeat(ctx.session.id, ctx.scene.id, value); } catch (error) { showToast(error.message); return; }
   refreshView();
 }
 
@@ -1594,7 +1574,7 @@ function insertIntimacyPrompt(role, text, heat) {
   input.focus();
 }
 
-function sendIntimacyMessage(role) {
+async function sendIntimacyMessage(role) {
   if (activeSafetySignal?.tier === 'hold') {
     showToast('Hold is active. Resume before sending.');
     return;
@@ -1604,47 +1584,35 @@ function sendIntimacyMessage(role) {
   const input = document.getElementById(`intimacyText-${role}`);
   const mode = document.getElementById(`intimacyMode-${role}`)?.value || 'spoken';
   const heatDelta = Number(input?.dataset.heat || 0);
-  const sent = VGIntimacy.sendMessage({
+  const sent = await VGIntimacy.sendMessage({
     sessionId: ctx.session.id,
     sceneId: ctx.scene.id,
     role,
     mode,
     text: input?.value || '',
     heatDelta,
-  });
+  }).catch(error => { showToast(error.message); return null; });
   if (sent && input) {
     input.value = '';
     input.dataset.heat = '0';
-    recordPlayerEvent('intimacy.message', {
-      sceneId: ctx.scene.id,
-      sceneTitle: ctx.scene.title,
-      role,
-      mode,
-      heatDelta,
-    });
     refreshView();
   }
 }
 
-function saveIntimacyCard(role) {
+async function saveIntimacyCard(role) {
   const ctx = getIntimacyContext();
   if (!ctx || !window.VGIntimacy) return;
   const want = [...document.querySelectorAll(`[data-want-${role}]`)]
     .filter(el => el.checked)
     .map(el => el.getAttribute(`data-want-${role}`));
-  VGIntimacy.saveCard(ctx.session.id, ctx.scene.id, role, {
+  const saved = await VGIntimacy.saveCard(ctx.session.id, ctx.scene.id, role, {
     want,
     pace: document.getElementById(`intimacyPace-${role}`)?.value || 'slow',
     ceiling: document.getElementById(`intimacyCeiling-${role}`)?.value || 'suggestive',
     notTonight: document.getElementById(`intimacyNotTonight-${role}`)?.value || '',
     note: document.getElementById(`intimacyNote-${role}`)?.value || '',
-  });
-  recordPlayerEvent('intimacy.card', {
-    sceneId: ctx.scene.id,
-    sceneTitle: ctx.scene.title,
-    role,
-    wantCount: want.length,
-  });
+  }).catch(error => { showToast(error.message); return null; });
+  if (!saved) return;
   showToast('Intimate table card saved.');
   refreshView();
 }

@@ -79,7 +79,7 @@ const VGIntimacy = (() => {
         sessionId,
         sceneId,
         heat: 12,
-        consent: { dm: 'suggestive', player: 'suggestive' },
+        consent: { dm: 'soft', player: 'soft' },
         createdAt: Date.now(),
         updatedAt: Date.now(),
       };
@@ -96,7 +96,8 @@ const VGIntimacy = (() => {
     return all[key];
   }
 
-  function setConsent(sessionId, sceneId, role, level) {
+  async function setConsent(sessionId, sceneId, role, level) {
+    if (window.VGSync?.getConfig().enabled) return VGSync.recordEvent('intimacy.consent', { level });
     const current = getSceneState(sessionId, sceneId);
     const valid = CONSENT_LEVELS.some(l => l.id === level) ? level : 'suggestive';
     return saveSceneState(sessionId, sceneId, {
@@ -104,8 +105,9 @@ const VGIntimacy = (() => {
     });
   }
 
-  function setHeat(sessionId, sceneId, value) {
+  async function setHeat(sessionId, sceneId, value) {
     const heat = Math.max(0, Math.min(100, Number(value) || 0));
+    if (window.VGSync?.getConfig().enabled) return VGSync.recordEvent('intimacy.heat', { heat });
     return saveSceneState(sessionId, sceneId, { heat });
   }
 
@@ -129,9 +131,10 @@ const VGIntimacy = (() => {
     return readJSON(CHAT_KEY, []).filter(msg => msg.key === key);
   }
 
-  function sendMessage({ sessionId, sceneId, role, mode, text, heatDelta = 0 }) {
+  async function sendMessage({ sessionId, sceneId, role, mode, text, heatDelta = 0 }) {
     const clean = String(text || '').trim();
     if (!clean) return null;
+    if (window.VGSync?.getConfig().enabled) return VGSync.recordEvent('intimacy.message', { message: clean, mode, heatDelta });
     const key = sceneKey(sessionId, sceneId);
     const messages = readJSON(CHAT_KEY, []);
     const msg = {
@@ -153,10 +156,12 @@ const VGIntimacy = (() => {
   function getCards(sessionId, sceneId) {
     const key = sceneKey(sessionId, sceneId);
     const all = readJSON(CARD_KEY, {});
-    return all[key] || {};
+    const entries = all[key] || {};
+    return Object.fromEntries(Object.entries(entries).map(([name, card]) => [card.role || name, card]));
   }
 
-  function saveCard(sessionId, sceneId, role, card) {
+  async function saveCard(sessionId, sceneId, role, card) {
+    if (window.VGSync?.getConfig().enabled) return VGSync.recordEvent('intimacy.card', { card });
     const key = sceneKey(sessionId, sceneId);
     const all = readJSON(CARD_KEY, {});
     all[key] = {
@@ -175,6 +180,8 @@ const VGIntimacy = (() => {
   }
 
   function getCompatibility(sessionId, sceneId) {
+    const compatibility = getSceneState(sessionId, sceneId).compatibility;
+    if (compatibility) return compatibility;
     const cards = getCards(sessionId, sceneId);
     const dm = cards.dm;
     const player = cards.player;

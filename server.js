@@ -5,12 +5,21 @@ const http = require('http');
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
+const { AsyncLocalStorage } = require('async_hooks');
+const openStore = require('./lib/store');
+const createMail = require('./lib/mail');
+const createMembers = require('./lib/members');
+const privacy = require('./lib/privacy');
 
 const ROOT = __dirname;
 const DATA_DIR = process.env.DATA_DIR || (fs.existsSync('/data') ? '/data' : path.join(ROOT, 'server-data'));
 const TABLES_FILE = path.join(DATA_DIR, 'tables.json');
 const ACCOUNTS_FILE = path.join(DATA_DIR, 'accounts.json');
 const PORT = Number(process.env.PORT || 8765);
+const store = openStore(DATA_DIR);
+const mail = createMail(store, DATA_DIR);
+const requestContext = new AsyncLocalStorage();
+let apiQueue = Promise.resolve();
 const PLAYER_ROLES = new Set(['warden', 'protagonist', 'boss', 'spectator']);
 const ACCOUNT_ROLES = new Set(['owner', 'admin', 'warden', 'player', 'spectator']);
 const PRESENCE_ONLINE_MS = 20_000;
@@ -50,6 +59,10 @@ const EVENT_TYPES = new Set([
   'dice.roll',
   'scene.change',
   'safety.signal',
+  'safety.threshold',
+  'safety.hearth',
+  'intimacy.consent',
+  'intimacy.heat',
   'map.reveal',
   'intimacy.message',
   'intimacy.card',
@@ -110,50 +123,194 @@ const MIME = {
 };
 
 const liveStreams = new Map();
+const members = createMembers({ readAccounts, writeAccounts, readTables, writeTables, safeUser, hashPassword, verifyPassword, createSession, addAudit, send, readBody, mail, closeSessions, publicUrl });
+
+function publicUrl(req) {
+  return process.env.PUBLIC_URL || (process.env.NODE_ENV === 'test' ? `http://${req.headers.host}` : 'https://velvetgrimore.xyz');
+}
+
+function tableRole(table, user) {
+  if (!user) return 'spectator';
+  const membership = table?.memberships?.[user.id];
+  return membership?.role || (table?.wardenId === user.id ? 'warden' : accountToTableRole(user.role));
+}
+
+function tableCanManage(table, user) {
+  return !!user && (['owner', 'admin'].includes(user.role) || tableRole(table, user) === 'warden');
+}
+
+function closeSessions(userId, token = null) {
+  for (const clients of liveStreams.values()) for (const client of [...clients]) {
+    if (client.user?.id === userId && (!token || client.token === token)) {
+      clearInterval(client.keepalive); client.res.end(); clients.delete(client);
+    }
+  }
+}
+
+function sessionPlayer(table, user, ready) {
+  return { clientId: user.id, name: user.displayName || user.username, role: tableCanManage(table, user) ? 'warden' : tableRole(table, user), ...(ready === undefined ? {} : { ready: !!ready }) };
+}
+
+function protectTableRequest(req, res, url) {
+  const match = url.pathname.match(/^\/api\/tables\/([A-Z0-9]{4,10})(?:\/(.*))?$/i);
+  if (!match) return true;
+  const code = match[1].toUpperCase();
+  const access = enforceTableAccess(req, res, code);
+  if (!access) return false;
+  const table = readTables().tables[code];
+  if (!table) { send(res, 404, { error: 'Table not found.' }); return false; }
+  normalizeTable(table);
+  const user = access.user;
+  const manage = tableCanManage(table, user);
+  requestContext.getStore().user = user;
+  requestContext.getStore().table = table;
+  const method = req.method;
+  const route = match[2] || '';
+  const mutating = !['GET', 'HEAD'].includes(method);
+  const body = req.parsedBody || {};
+  if (mutating) {
+    if (table.archived && route !== 'manage') { send(res, 410, { error: 'This table is archived.' }); return false; }
+    const suppliedId = body.player?.clientId || body.player?.id || body.clientId;
+    if (suppliedId && suppliedId !== user.id) { send(res, 403, { error: 'You can only act as your signed-in account.' }); return false; }
+    const requestedRole = body.player?.role || body.role;
+    if (requestedRole === 'warden' && !manage) { send(res, 403, { error: 'Warden access is required.' }); return false; }
+    const playerPath = route.match(/^players\/([^/]+)$/);
+    if (playerPath && method !== 'DELETE' && playerPath[1] !== user.id) { send(res, 403, { error: 'You can only update your own seat.' }); return false; }
+    const joining = route === 'players' && method === 'POST';
+    const operation = route === 'manage' || (playerPath && method === 'DELETE');
+    if (!joining && !operation && !table.players[user.id]) { send(res, 403, { error: 'Resume this table before sending actions.' }); return false; }
+    if (joining && table.locked && !table.players[user.id] && !manage) { send(res, 423, { error: 'This table is locked. Contact the Warden.' }); return false; }
+    if (tableRole(table, user) === 'spectator' && !operation && !joining && route !== 'presence' && route !== 'messages' && !route.endsWith('/messages')) { send(res, 403, { error: 'Spectators cannot change game state.' }); return false; }
+    const wardenOnly = method === 'PUT' && !route || route === 'flow' && method === 'PATCH' || ['prompts', 'handouts', 'rooms', 'checkpoints'].includes(route) && method === 'POST' || /^events\/\d+$/.test(route) && method === 'PATCH';
+    if (wardenOnly && !manage) { send(res, 403, { error: 'Only the Warden can perform this action.' }); return false; }
+    const allowedEvents = new Set(['dice.roll', 'safety.signal', 'safety.threshold', 'safety.hearth', 'intimacy.consent', 'intimacy.heat', 'intimacy.message', 'intimacy.card', 'movement.request', 'scene.change', 'map.reveal', 'note.added']);
+    if (route === 'events' && method === 'POST' && !manage && !allowedEvents.has(body.type)) { send(res, 403, { error: 'This action is reserved for the Warden.' }); return false; }
+    const frozen = table.status === 'paused' || ['hold', 'snuff'].includes(readSnapshotJSON(table, 'vg_signals', []).at(-1)?.tier);
+    if (frozen && route === 'events' && ['dice.roll', 'scene.change', 'map.reveal', 'movement.request', 'intimacy.message'].includes(body.type)) { send(res, 409, { error: 'Play is paused. Wait for the Warden to resume.' }); return false; }
+    if (route === 'events' && body.type === 'safety.signal' && body.detail?.tier === 'resume' && !manage) { send(res, 403, { error: 'Only the Warden can resume play.' }); return false; }
+    const ready = body.player?.ready ?? body.ready;
+    const actor = sessionPlayer(table, user, ready);
+    Object.assign(body, { clientId: user.id, role: actor.role, player: actor });
+    if (route === 'players' || route.startsWith('players/') || route === 'presence') body.name = actor.name;
+    if (method === 'PUT' && !route) {
+      if (!Number.isInteger(body.baseRev) || body.baseRev < table.authoringRev || body.baseRev > table.rev) { send(res, 409, { error: 'This table changed since your last save. Your edits are still in this browser; reload the saved table before replacing them.', conflict: true, rev: table.rev }); return false; }
+      body.snapshot = protectServerState(table, body.snapshot);
+    }
+  }
+  url.searchParams.set('clientId', user.id);
+  if (!manage) { url.searchParams.delete('pending'); url.searchParams.set('role', tableRole(table, user)); }
+  req.url = url.pathname + url.search;
+  return true;
+}
+
+const SERVER_STATE_KEYS = ['vg_signals', 'vg_intimacy_chat', 'vg_intimacy_state', 'vg_intimacy_cards', 'vg_threshold_current', 'vg_thresholds', 'vg_hearths', 'vg_stations_done', 'vg_player_notes'];
+function protectServerState(table, input) {
+  const source = input && typeof input === 'object' && !Array.isArray(input) ? cloneJSON(input) : { keys: {} };
+  source.keys ||= {};
+  for (const key of SERVER_STATE_KEYS) {
+    if (table.snapshot?.keys?.[key] !== undefined) source.keys[key] = table.snapshot.keys[key];
+    else delete source.keys[key];
+  }
+  source.changedKeys = Object.keys(source.keys).filter(key => !SERVER_STATE_KEYS.includes(key));
+  return source;
+}
+
+function applyMemberAction(table, event, player) {
+  const detail = event.detail || {};
+  const userId = player.id;
+  const now = new Date().toISOString();
+  table.personal[userId] ||= {};
+  const personal = table.personal[userId];
+  const session = readSnapshotJSON(table, 'vg_session', null);
+  const sceneId = session?.currentSceneId;
+  const sessionId = session?.id;
+  const key = `${sessionId || 'no-session'}::${sceneId || 'no-scene'}`;
+  const role = player.role === 'warden' ? 'dm' : 'player';
+  let changed = [];
+  if (event.type === 'safety.signal') {
+    const tier = String(detail.tier || 'hold');
+    if (!['dim', 'hold', 'snuff', 'veil', 'stoke', 'rewrite', 'resume'].includes(tier)) throw new Error('Invalid safety signal');
+    const signals = readSnapshotJSON(table, 'vg_signals', []);
+    signals.push({ tier, at: now, clientId: userId, name: player.name });
+    writeSnapshotJSON(table, 'vg_signals', signals.slice(-100));
+    if (['hold', 'snuff'].includes(tier)) table.status = 'paused';
+    if (tier === 'resume') table.status = 'live';
+    changed = ['vg_signals'];
+  } else if (event.type === 'safety.threshold') {
+    const data = detail.threshold || {};
+    personal.threshold = { ...data, playerName: player.name, clientId: userId, sealedAt: now };
+    personal.thresholds = [...(personal.thresholds || []), personal.threshold].slice(-20);
+    event.detail = {}; event.text = `${player.name} completed their Threshold.`;
+    changed = ['vg_threshold_current', 'vg_thresholds'];
+  } else if (event.type === 'safety.hearth') {
+    personal.hearths = [...(personal.hearths || []), { ...(detail.hearth || {}), clientId: userId, sealedAt: now }].slice(-20);
+    event.detail = {}; event.text = `${player.name} completed their Hearth.`;
+    changed = ['vg_hearths'];
+  } else if (event.type === 'intimacy.message') {
+    if (!sessionId || !sceneId || !String(detail.message || '').trim()) throw new Error('An active scene and message are required');
+    const messages = readSnapshotJSON(table, 'vg_intimacy_chat', []);
+    messages.push({ id: crypto.randomUUID(), key, sessionId, sceneId, clientId: userId, name: player.name, role, mode: ['spoken', 'action', 'thought', 'whisper', 'ooc'].includes(detail.mode) ? detail.mode : 'spoken', text: String(detail.message).trim().slice(0, 1200), at: Date.now() });
+    writeSnapshotJSON(table, 'vg_intimacy_chat', messages.slice(-180));
+    event.detail = { sceneId }; changed = ['vg_intimacy_chat'];
+  } else if (event.type === 'intimacy.card') {
+    if (!sessionId || !sceneId) throw new Error('An active scene is required');
+    const cards = readSnapshotJSON(table, 'vg_intimacy_cards', {});
+    cards[key] ||= {};
+    const card = detail.card || {};
+    cards[key][userId] = { clientId: userId, role, want: Array.isArray(card.want) ? card.want.map(String).slice(0, 20) : [], pace: String(card.pace || 'slow').slice(0, 40), ceiling: String(card.ceiling || 'suggestive').slice(0, 40), notTonight: String(card.notTonight || '').slice(0, 500), note: String(card.note || '').slice(0, 500), updatedAt: Date.now() };
+    writeSnapshotJSON(table, 'vg_intimacy_cards', cards);
+    const allCards = Object.values(cards[key]);
+    const states = readSnapshotJSON(table, 'vg_intimacy_state', {});
+    states[key] ||= { sessionId, sceneId, heat: 12, consent: { dm: 'soft', player: 'soft' } };
+    const shared = allCards.length > 1 ? allCards[0].want.filter(want => allCards.every(card => card.want.includes(want))) : [];
+    states[key].compatibility = allCards.length < 2 ? { status: 'waiting', label: 'Waiting for all cards', shared: [] } : { status: shared.length ? 'open' : 'slow', label: shared.length ? `Shared wants: ${shared.join(', ')}` : 'No shared wants selected. Keep it soft.', shared };
+    writeSnapshotJSON(table, 'vg_intimacy_state', states);
+    event.detail = { sceneId }; event.text = `${player.name} saved their private card.`; changed = ['vg_intimacy_cards', 'vg_intimacy_state'];
+  } else if (event.type === 'intimacy.heat') {
+    if (!sessionId || !sceneId) throw new Error('An active scene is required');
+    const states = readSnapshotJSON(table, 'vg_intimacy_state', {});
+    states[key] ||= { sessionId, sceneId, consent: { dm: 'soft', player: 'soft' } };
+    states[key].heat = Math.max(0, Math.min(100, Number(detail.heat) || 0));
+    writeSnapshotJSON(table, 'vg_intimacy_state', states); changed = ['vg_intimacy_state'];
+  } else if (event.type === 'intimacy.consent') {
+    if (!sessionId || !sceneId || !['soft', 'suggestive', 'explicit', 'veil'].includes(detail.level)) throw new Error('Choose a consent level for the active scene');
+    const states = readSnapshotJSON(table, 'vg_intimacy_state', {});
+    const state = states[key] || { sessionId, sceneId, heat: 12, consent: {} };
+    state.consentByUser ||= {}; state.consentByUser[userId] = { level: detail.level, role };
+    const rank = { veil: -1, soft: 0, suggestive: 1, explicit: 2 };
+    for (const type of ['dm', 'player']) {
+      const values = Object.values(state.consentByUser).filter(v => v.role === type).map(v => v.level);
+      state.consent[type] = values.sort((a, b) => rank[a] - rank[b])[0] || 'soft';
+    }
+    states[key] = state; writeSnapshotJSON(table, 'vg_intimacy_state', states); changed = ['vg_intimacy_state'];
+  } else if (event.type === 'note.added' && detail.action === 'scene-note') {
+    personal.notes ||= {}; personal.notes[String(sceneId || '')] = String(detail.note || '').slice(0, 4000);
+    event.detail = {}; event.text = `${player.name} saved a private scene note.`; changed = ['vg_player_notes'];
+  }
+  if (changed.length) {
+    table.rev += 1; table.updatedBy = 'server'; table.savedAt = now;
+    table.snapshot.changedKeys = changed;
+  }
+}
 
 function ensureDataFile() {
-  if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
-  if (!fs.existsSync(TABLES_FILE)) fs.writeFileSync(TABLES_FILE, JSON.stringify({ tables: {} }, null, 2));
-  if (!fs.existsSync(ACCOUNTS_FILE)) fs.writeFileSync(ACCOUNTS_FILE, JSON.stringify({ users: {}, sessions: {}, audit: [], userSeq: 0, settings: { allowGuestJoins: true }, invites: {} }, null, 2));
+  if (!store.healthy()) throw new Error('Saved state is unavailable');
 }
 
 function readTables() {
-  ensureDataFile();
-  try {
-    const data = JSON.parse(fs.readFileSync(TABLES_FILE, 'utf8'));
-    if (!data || typeof data !== 'object') return { tables: {} };
-    if (!data.tables || typeof data.tables !== 'object') data.tables = {};
-    return data;
-  } catch (err) {
-    return { tables: {} };
-  }
+  return store.readTables();
 }
 
 function writeTables(data) {
-  ensureDataFile();
-  fs.writeFileSync(TABLES_FILE, JSON.stringify(data, null, 2));
+  store.writeTables(data);
 }
 
 function readAccounts() {
-  ensureDataFile();
-  try {
-    const data = JSON.parse(fs.readFileSync(ACCOUNTS_FILE, 'utf8'));
-    if (!data || typeof data !== 'object') return { users: {}, sessions: {}, audit: [], userSeq: 0, settings: { allowGuestJoins: true }, invites: {} };
-    if (!data.users || typeof data.users !== 'object') data.users = {};
-    if (!data.sessions || typeof data.sessions !== 'object') data.sessions = {};
-    if (!Array.isArray(data.audit)) data.audit = [];
-    if (!data.settings || typeof data.settings !== 'object') data.settings = { allowGuestJoins: true };
-    if (!data.invites || typeof data.invites !== 'object') data.invites = {};
-    data.userSeq = Number(data.userSeq || 0);
-    return data;
-  } catch (err) {
-    return { users: {}, sessions: {}, audit: [], userSeq: 0, settings: { allowGuestJoins: true }, invites: {} };
-  }
+  return store.readAccounts();
 }
 
 function writeAccounts(data) {
-  ensureDataFile();
-  fs.writeFileSync(ACCOUNTS_FILE, JSON.stringify(data, null, 2));
+  store.writeAccounts(data);
 }
 
 function cleanAccountRole(role, fallback = 'player') {
@@ -205,6 +362,7 @@ function safeUser(user) {
   return {
     id: user.id,
     username: user.username,
+    email: user.email || '',
     displayName: user.displayName,
     role: user.role,
     tableCodes: Array.isArray(user.tableCodes) ? user.tableCodes : [],
@@ -218,8 +376,8 @@ function safeUser(user) {
 
 function accountSettings(accounts) {
   if (!accounts.settings || typeof accounts.settings !== 'object') accounts.settings = {};
-  if (accounts.settings.allowGuestJoins === undefined) accounts.settings.allowGuestJoins = true;
-  accounts.settings.allowGuestJoins = accounts.settings.allowGuestJoins !== false;
+  accounts.settings.allowGuestJoins = false;
+  accounts.settings.membersOnly = true;
   return accounts.settings;
 }
 
@@ -257,7 +415,7 @@ function inviteCanBeAccepted(invite) {
 
 function addAudit(accounts, actor, action, detail = {}) {
   accounts.audit.push({
-    id: accounts.audit.length + 1,
+    id: (accounts.auditSeq = Math.max(Number(accounts.auditSeq || 0), ...accounts.audit.map(e => Number(e.id || 0))) + 1),
     action,
     actorId: actor?.id || null,
     actorName: actor?.displayName || actor?.username || null,
@@ -304,16 +462,7 @@ function createSession(accounts, user) {
 }
 
 function authToken(req) {
-  const auth = String(req.headers.authorization || '');
-  if (auth.toLowerCase().startsWith('bearer ')) return auth.slice(7).trim();
-  try {
-    const url = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
-    const queryToken = String(url.searchParams.get('token') || '').trim();
-    if (queryToken) return queryToken;
-  } catch (err) {
-    // Header auth still works if the URL is malformed.
-  }
-  return String(req.headers['x-vg-token'] || '').trim();
+  return members.token(req);
 }
 
 function authenticatedUser(req, accounts) {
@@ -344,18 +493,20 @@ function canAccessTableCode(user, tableCode) {
 function canOperateTable(user, tableCode) {
   if (!user) return false;
   if (['owner', 'admin'].includes(user.role)) return true;
-  return user.role === 'warden' && canAccessTableCode(user, tableCode);
+  const table = readTables().tables[tableCode];
+  return canAccessTableCode(user, tableCode) && tableRole(table, user) === 'warden';
 }
 
 function authorizeTableAccess(req, tableCode) {
   const accounts = normalizeAccounts(readAccounts());
-  if (!accountSystemReady(accounts)) return { ok: true, accounts, user: null };
   const auth = authenticatedUser(req, accounts);
   if (auth?.user) {
+    if (auth.user.mustResetPassword) return { ok: false, accounts, status: 428, error: 'Change your temporary password to continue.' };
+    const table = readTables().tables[tableCode];
+    if (table?.memberships?.[auth.user.id]?.removed) return { ok: false, accounts, status: 403, error: 'Your table access has been removed. Contact the Warden.' };
     if (canAccessTableCode(auth.user, tableCode)) return { ok: true, accounts, user: auth.user, token: auth.token };
     return { ok: false, accounts, status: 403, error: 'This account is not assigned to this table.' };
   }
-  if (accountSettings(accounts).allowGuestJoins) return { ok: true, accounts, user: null };
   return { ok: false, accounts, status: 401, error: 'Login required for this table.' };
 }
 
@@ -368,10 +519,8 @@ function authorizeTableOperation(req, tableCode) {
 
 function authorizeTableCreate(req) {
   const accounts = normalizeAccounts(readAccounts());
-  if (!accountSystemReady(accounts)) return { ok: true, accounts, user: null };
   const auth = authenticatedUser(req, accounts);
   if (!auth?.user) {
-    if (accountSettings(accounts).allowGuestJoins) return { ok: true, accounts, user: null };
     return { ok: false, accounts, status: 401, error: 'Login required to create a table.' };
   }
   if (['owner', 'admin', 'warden'].includes(auth.user.role)) return { ok: true, accounts, user: auth.user, token: auth.token };
@@ -382,7 +531,7 @@ function enforceTableAccess(req, res, tableCode) {
   const access = authorizeTableAccess(req, tableCode);
   writeAccounts(access.accounts);
   if (!access.ok) {
-    send(res, access.status || 403, { error: access.error || 'Table access denied.' });
+    send(res, access.status || 403, { error: access.error || 'Table access denied.', accessDenied: true });
     return null;
   }
   return access;
@@ -447,6 +596,8 @@ function cleanBookmark(value) {
 function normalizeTable(table) {
   const now = new Date().toISOString();
   if (!table.players || typeof table.players !== 'object' || Array.isArray(table.players)) table.players = {};
+  if (!table.memberships || typeof table.memberships !== 'object') table.memberships = {};
+  if (!table.personal || typeof table.personal !== 'object') table.personal = {};
   if (!Array.isArray(table.messages)) table.messages = [];
   if (!Array.isArray(table.events)) table.events = [];
   if (!Array.isArray(table.checkpoints)) table.checkpoints = [];
@@ -463,6 +614,7 @@ function normalizeTable(table) {
   if (table.archived) table.status = 'archived';
   table.snapshot = table.snapshot || {};
   table.rev = Number(table.rev || 1);
+  table.authoringRev = Number(table.authoringRev || table.rev);
   table.msgSeq = Number(table.msgSeq || 0);
   table.evtSeq = Number(table.evtSeq || 0);
   table.checkpointSeq = Number(table.checkpointSeq || 0);
@@ -607,7 +759,7 @@ function canWriteSnapshot(table, clientId) {
 }
 
 function currentWarden(table) {
-  return Object.values(table.players || {}).find(player => player.role === 'warden') || null;
+  return table.players?.[table.wardenId] || Object.values(table.players || {}).find(player => player.role === 'warden') || null;
 }
 
 function actorPlayer(user, fallback = {}) {
@@ -619,11 +771,13 @@ function actorPlayer(user, fallback = {}) {
   return cleanPlayer({
     clientId: user.id,
     name: user.displayName || user.username || 'Admin',
-    role: accountToTableRole(user.role),
+    role: tableRole(requestContext.getStore()?.table, user),
   }, 'warden');
 }
 
 function canUseRole(table, clientId, role) {
+  const user = requestContext.getStore()?.user;
+  if (user?.id === clientId && tableCanManage(table, user)) return true;
   const nextRole = cleanRole(role);
   if (nextRole !== 'warden') return true;
   const warden = currentWarden(table);
@@ -634,9 +788,9 @@ function cleanMessage(input = {}, player = null) {
   const text = String(input.text || input.message || '').trim().slice(0, 1000);
   if (!text) return null;
   return {
-    clientId: String(input.clientId || player?.id || '').trim().slice(0, 80),
-    name: String(input.name || player?.name || 'Seated Player').trim().slice(0, 80) || 'Seated Player',
-    role: cleanRole(input.role || player?.role, player?.role || 'protagonist'),
+    clientId: String(player?.id || input.clientId || '').trim().slice(0, 80),
+    name: String(player?.name || input.name || 'Seated Player').trim().slice(0, 80) || 'Seated Player',
+    role: cleanRole(player?.role || input.role, player?.role || 'protagonist'),
     text,
   };
 }
@@ -675,9 +829,9 @@ function cleanEvent(input = {}, player = null) {
   const detail = input.detail && typeof input.detail === 'object' && !Array.isArray(input.detail) ? input.detail : {};
   return {
     type,
-    clientId: String(input.clientId || player?.id || '').trim().slice(0, 80),
-    name: String(input.name || player?.name || 'Seated Player').trim().slice(0, 80) || 'Seated Player',
-    role: cleanRole(input.role || player?.role, player?.role || 'protagonist'),
+    clientId: String(player?.id || input.clientId || '').trim().slice(0, 80),
+    name: String(player?.name || input.name || 'Seated Player').trim().slice(0, 80) || 'Seated Player',
+    role: cleanRole(player?.role || input.role, player?.role || 'protagonist'),
     text,
     detail,
     category: eventCategory(type, input.category),
@@ -715,10 +869,12 @@ function addEvent(table, input, player = null) {
 function eventsPayload(table, since = 0, includePending = false) {
   normalizeTable(table);
   const after = Number(since || 0);
-  const events = table.events.filter(event => {
+  const viewer = requestContext.getStore()?.user;
+  const manage = tableCanManage(table, viewer);
+  const events = privacy.events(table, table.events.filter(event => {
     if (event.id <= after) return false;
-    return includePending || event.status !== 'pending';
-  });
+    return manage && includePending || event.status !== 'pending' || event.clientId === viewer?.id;
+  }), viewer, manage);
   const lastVisibleId = events.reduce((max, event) => Math.max(max, event.id), after);
   return {
     code: table.code,
@@ -769,9 +925,9 @@ function checkpointPayload(table) {
   return {
     code: table.code,
     lastCheckpointId: table.checkpointSeq || 0,
-    checkpoints: table.checkpoints.slice().reverse().map(checkpoint => ({
+    checkpoints: table.checkpoints.slice().reverse().map(({ snapshot, ...checkpoint }) => ({
       ...checkpoint,
-      summary: checkpointSummary(checkpoint.snapshot),
+      summary: checkpointSummary(snapshot),
     })),
   };
 }
@@ -1006,14 +1162,16 @@ function addCheckpoint(table, input = {}, player = null, reason = 'manual') {
   };
   table.checkpoints.push(checkpoint);
   table.checkpoints = table.checkpoints.slice(-MAX_CHECKPOINTS);
+  table.savedAt = now;
   table.updatedAt = now;
   return checkpoint;
 }
 
 function restoreCheckpoint(table, checkpoint, player) {
   normalizeTable(table);
-  table.snapshot = cloneJSON(checkpoint.snapshot || {});
+  table.snapshot = protectServerState(table, checkpoint.snapshot || {});
   table.rev = Number(table.rev || 1) + 1;
+  table.authoringRev = table.rev;
   table.updatedAt = new Date().toISOString();
   table.updatedBy = player?.id || null;
   addEvent(table, {
@@ -1177,6 +1335,9 @@ function applySceneAction(table, event) {
   if (!sceneId) return { applied: false, reason: 'No target scene was supplied.' };
   const session = readSnapshotJSON(table, 'vg_session', null);
   if (!session || typeof session !== 'object') return { applied: false, reason: 'No active shared session is available.' };
+  const target = readSnapshotJSON(table, 'vg_campaigns', []).find(campaign => campaign.id === session.campaignId)?.scenes?.find(scene => scene.id === sceneId);
+  if (!target) return { applied: false, reason: 'That scene is not in the current campaign.' };
+  event.detail.sceneTitle = target.title;
   const previousSceneId = session.currentSceneId || null;
   if (!Array.isArray(session.history)) session.history = [];
   if (previousSceneId) {
@@ -1214,6 +1375,7 @@ function applyApprovedAction(table, event, player) {
   event.applyResult = result;
   if (result.applied) {
     table.rev += 1;
+    table.authoringRev = table.rev;
     table.updatedBy = player.id;
     if (event.type === 'scene.change') {
       addCheckpoint(table, {
@@ -1237,6 +1399,7 @@ function applyApprovedAction(table, event, player) {
 }
 
 function send(res, status, body, headers = {}) {
+  if (requestContext.getStore()?.transaction) store.commit();
   const text = typeof body === 'string' ? body : JSON.stringify(body);
   res.writeHead(status, {
     'Content-Type': typeof body === 'string' ? 'text/plain; charset=utf-8' : 'application/json; charset=utf-8',
@@ -1247,11 +1410,13 @@ function send(res, status, body, headers = {}) {
 }
 
 function readBody(req) {
+  if (req.parsedBody !== undefined) return Promise.resolve(req.parsedBody);
+  if (['GET', 'HEAD', 'DELETE'].includes(req.method)) return Promise.resolve({});
   return new Promise((resolve, reject) => {
     let raw = '';
     req.on('data', chunk => {
       raw += chunk;
-      if (raw.length > 5_000_000) {
+      if (raw.length > (req.url.startsWith('/api/accounts') ? 16_384 : 5_000_000)) {
         reject(new Error('Body too large'));
         req.destroy();
       }
@@ -1264,7 +1429,7 @@ function readBody(req) {
   });
 }
 
-function tablePayload(table) {
+function tablePayload(table, viewer = requestContext.getStore()?.user) {
   normalizeTable(table);
   const writer = currentWarden(table);
   return {
@@ -1274,7 +1439,8 @@ function tablePayload(table) {
     locked: !!table.locked,
     archived: !!table.archived,
     rev: table.rev,
-    snapshot: table.snapshot || {},
+    snapshot: privacy.snapshot(table, viewer, tableCanManage(table, viewer)),
+    savedAt: table.savedAt || table.createdAt,
     players: Object.values(table.players || {}).sort((a, b) => {
       const rank = { warden: 0, protagonist: 1, boss: 2, spectator: 3 };
       return (rank[a.role] ?? 9) - (rank[b.role] ?? 9) || String(a.name).localeCompare(String(b.name));
@@ -1283,6 +1449,8 @@ function tablePayload(table) {
       snapshotWriterRole: 'warden',
       snapshotWriterId: writer?.id || null,
       snapshotWriterName: writer?.name || null,
+      canWriteSharedState: tableCanManage(table, viewer),
+      role: tableRole(table, viewer),
     },
     flow: table.flow || {},
     updatedAt: table.updatedAt,
@@ -1293,10 +1461,10 @@ function tablePayload(table) {
 function tableSummary(table, accounts = null) {
   normalizeTable(table);
   const players = tablePayload(table).players;
-  const assignedUsers = accounts
+  const assignedUsers = accounts && tableCanManage(table, requestContext.getStore()?.user)
     ? Object.values(accounts.users || {}).filter(user => user.active !== false && canAccessTableCode(user, table.code)).map(safeUser)
     : [];
-  const warden = players.find(player => player.role === 'warden') || null;
+  const warden = players.find(player => player.role === 'warden') || accounts?.users?.[table.wardenId || table.ownerId] || null;
   return {
     code: table.code,
     name: table.name,
@@ -1305,12 +1473,15 @@ function tableSummary(table, accounts = null) {
     archived: !!table.archived,
     playerCount: players.length,
     onlineCount: players.filter(player => player.online).length,
-    wardenName: warden?.name || null,
+    wardenName: warden?.name || warden?.displayName || null,
     wardenId: warden?.id || null,
     assignedUsers,
     createdAt: table.createdAt,
     updatedAt: table.updatedAt,
     rev: table.rev,
+    savedAt: table.savedAt || table.createdAt,
+    canManage: tableCanManage(table, requestContext.getStore()?.user),
+    session: checkpointSummary(table.snapshot),
   };
 }
 
@@ -1329,12 +1500,13 @@ function writeLive(res, event, payload) {
 
 function liveClientPayload(table, client, reason = 'sync') {
   const messages = messagesPayload(table, client.lastMessageId || 0);
-  const events = eventsPayload(table, client.lastEventId || 0, client.includePending);
+  const visibleEvents = privacy.events(table, table.events.filter(event => event.id > (client.lastEventId || 0)), client.user, tableCanManage(table, client.user));
+  const events = { code: table.code, events: visibleEvents, lastEventId: table.evtSeq };
   client.lastMessageId = Math.max(client.lastMessageId || 0, messages.lastMessageId || 0);
   client.lastEventId = Math.max(client.lastEventId || 0, events.lastEventId || 0);
   return {
     reason,
-    table: tablePayload(table),
+    table: tablePayload(table, client.user),
     messages,
     events,
     flow: tableFlowPayload(table, client.player || null),
@@ -1344,11 +1516,20 @@ function liveClientPayload(table, client, reason = 'sync') {
 }
 
 function broadcastTable(tableCode, reason, table) {
+  if (requestContext.getStore()?.transaction) store.commit();
   const codeKey = String(tableCode || '').toUpperCase();
   const clients = liveStreams.get(codeKey);
   if (!clients || !clients.size) return;
   for (const client of Array.from(clients)) {
     try {
+      const accounts = readAccounts();
+      const session = accounts.sessions[client.token];
+      const user = accounts.users[session?.userId];
+      if (!session || !user || user.active === false || user.mustResetPassword || Date.parse(session.expiresAt) <= Date.now() || !canAccessTableCode(user, codeKey) || table.memberships?.[user.id]?.removed) {
+        clearInterval(client.keepalive); client.res.end(); clients.delete(client); continue;
+      }
+      client.user = user;
+      client.player = { ...table.players?.[user.id], id: user.id, role: tableRole(table, user) };
       writeLive(client.res, 'sync', liveClientPayload(table, client, reason));
     } catch (err) {
       clearInterval(client.keepalive);
@@ -1362,19 +1543,25 @@ function openLiveStream(req, res, tableCode) {
   const data = readTables();
   const table = data.tables[tableCode] && normalizeTable(data.tables[tableCode]);
   if (!table) return send(res, 404, { error: 'Table not found' });
-  if (!enforceTableAccess(req, res, tableCode)) return;
+  const access = enforceTableAccess(req, res, tableCode);
+  if (!access) return;
 
   const url = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
-  const includePending = url.searchParams.get('pending') === '1' || cleanRole(url.searchParams.get('role')) === 'warden';
+  const includePending = tableCanManage(table, access.user);
+  const connections = [...liveStreams.values()].reduce((count, clients) => count + [...clients].filter(client => client.user.id === access.user.id).length, 0);
+  if (connections >= 8) return send(res, 429, { error: 'Too many open table connections. Close another table tab.' });
   const client = {
     res,
+    user: access.user,
+    token: access.token,
     includePending,
-    player: table.players?.[url.searchParams.get('clientId')] || null,
+    player: { ...table.players?.[access.user.id], id: access.user.id, role: tableRole(table, access.user) },
     lastMessageId: Number(url.searchParams.get('lastMessageId') || 0),
     lastEventId: Number(url.searchParams.get('lastEventId') || 0),
     keepalive: null,
   };
 
+  if (requestContext.getStore()?.transaction) store.commit();
   res.writeHead(200, {
     'Content-Type': 'text/event-stream; charset=utf-8',
     'Cache-Control': 'no-store, no-transform',
@@ -1388,6 +1575,8 @@ function openLiveStream(req, res, tableCode) {
   writeLive(res, 'sync', liveClientPayload(table, client, 'connected'));
   client.keepalive = setInterval(() => {
     try {
+      const access = authorizeTableAccess(req, tableCode);
+      if (!access.ok) { clearInterval(client.keepalive); res.end(); liveStreams.get(tableCode)?.delete(client); return; }
       writeLive(res, 'ping', { sentAt: new Date().toISOString() });
     } catch (err) {
       clearInterval(client.keepalive);
@@ -1406,272 +1595,9 @@ function openLiveStream(req, res, tableCode) {
 
 async function handleApi(req, res, pathname) {
   if (req.method === 'GET' && pathname === '/api/health') {
-    return send(res, 200, { ok: true, service: 'velvet-grimoire-sync' });
+    return send(res, store.healthy() ? 200 : 503, { ok: store.healthy(), service: 'velvet-grimoire-sync', version: '16.0.0' });
   }
 
-  if (pathname.startsWith('/api/accounts')) {
-    const accounts = normalizeAccounts(readAccounts());
-    const accountMatch = pathname.match(/^\/api\/accounts\/users(?:\/([^/]+))?$/i);
-    const auditMatch = pathname === '/api/accounts/audit';
-    const settingsMatch = pathname === '/api/accounts/settings';
-    const inviteMatch = pathname.match(/^\/api\/accounts\/invites(?:\/([^/]+))?$/i);
-
-    if (req.method === 'GET' && pathname === '/api/accounts/setup') {
-      const needsSetup = !accountSystemReady(accounts);
-      writeAccounts(accounts);
-      return send(res, 200, { needsSetup, settings: accountSettings(accounts) });
-    }
-
-    if (req.method === 'POST' && pathname === '/api/accounts/bootstrap') {
-      const users = Object.values(accounts.users || {});
-      if (users.some(user => user.active !== false && ['owner', 'admin'].includes(user.role))) {
-        return send(res, 409, { error: 'Owner account already exists.' });
-      }
-      const body = await readBody(req);
-      const now = new Date().toISOString();
-      const password = String(body.password || '').trim() || generatePassword();
-      const username = cleanUsername(body.username || 'owner');
-      if (!username) return send(res, 400, { error: 'Username is required' });
-      const hashed = hashPassword(password);
-      accounts.userSeq = Number(accounts.userSeq || 0) + 1;
-      const user = {
-        id: `user-${accounts.userSeq}`,
-        username,
-        displayName: String(body.displayName || body.name || 'Owner').trim().slice(0, 80) || 'Owner',
-        role: 'owner',
-        tableCodes: [],
-        active: true,
-        passwordHash: hashed.hash,
-        passwordSalt: hashed.salt,
-        passwordIterations: hashed.iterations,
-        mustResetPassword: !body.password,
-        createdAt: now,
-        updatedAt: now,
-      };
-      accounts.users[user.id] = user;
-      const token = createSession(accounts, user);
-      addAudit(accounts, user, 'account.bootstrap', { userId: user.id, username });
-      writeAccounts(accounts);
-      return send(res, 201, { user: safeUser(user), token, temporaryPassword: body.password ? null : password });
-    }
-
-    if (req.method === 'POST' && pathname === '/api/accounts/login') {
-      const body = await readBody(req);
-      const username = cleanUsername(body.username);
-      const user = Object.values(accounts.users || {}).find(item => item.username === username);
-      if (!user || user.active === false || !verifyPassword(body.password, user)) {
-        writeAccounts(accounts);
-        return send(res, 401, { error: 'Invalid username or password.' });
-      }
-      const token = createSession(accounts, user);
-      addAudit(accounts, user, 'account.login', { userId: user.id });
-      writeAccounts(accounts);
-      return send(res, 200, { user: safeUser(user), token });
-    }
-
-    if (req.method === 'POST' && pathname === '/api/accounts/invites/accept') {
-      const body = await readBody(req);
-      const codeKey = String(body.code || '').trim().toUpperCase().replace(/[^A-Z0-9]+/g, '');
-      const invite = accounts.invites?.[codeKey];
-      if (!inviteCanBeAccepted(invite)) {
-        writeAccounts(accounts);
-        return send(res, 404, { error: 'Invite is invalid, expired, or already used.' });
-      }
-      const username = cleanUsername(body.username || invite.username || body.displayName || invite.displayName);
-      if (!username) return send(res, 400, { error: 'Username is required.' });
-      if (Object.values(accounts.users || {}).some(user => user.username === username)) {
-        writeAccounts(accounts);
-        return send(res, 409, { error: 'Username already exists.' });
-      }
-      const password = String(body.password || '').trim() || generatePassword();
-      const hashed = hashPassword(password);
-      const now = new Date().toISOString();
-      accounts.userSeq = Number(accounts.userSeq || 0) + 1;
-      const user = {
-        id: `user-${accounts.userSeq}`,
-        username,
-        displayName: String(body.displayName || invite.displayName || username).trim().slice(0, 80) || username,
-        role: cleanAccountRole(invite.role, 'player'),
-        tableCodes: cleanTableCodes(invite.tableCodes),
-        active: true,
-        passwordHash: hashed.hash,
-        passwordSalt: hashed.salt,
-        passwordIterations: hashed.iterations,
-        mustResetPassword: !body.password,
-        createdAt: now,
-        updatedAt: now,
-      };
-      accounts.users[user.id] = user;
-      invite.usedAt = now;
-      invite.usedBy = user.id;
-      invite.active = false;
-      const token = createSession(accounts, user);
-      addAudit(accounts, user, 'invite.accepted', { code: codeKey, userId: user.id, username });
-      writeAccounts(accounts);
-      return send(res, 201, { user: safeUser(user), token, invite: safeInvite(invite), temporaryPassword: body.password ? null : password });
-    }
-
-    if (req.method === 'POST' && pathname === '/api/accounts/logout') {
-      const token = authToken(req);
-      const auth = authenticatedUser(req, accounts);
-      if (token) delete accounts.sessions[token];
-      if (auth?.user) addAudit(accounts, auth.user, 'account.logout', { userId: auth.user.id });
-      writeAccounts(accounts);
-      return send(res, 200, { ok: true });
-    }
-
-    const auth = authenticatedUser(req, accounts);
-    if (!auth?.user) {
-      writeAccounts(accounts);
-      return send(res, 401, { error: 'Login required.' });
-    }
-
-    if (req.method === 'GET' && pathname === '/api/accounts/me') {
-      writeAccounts(accounts);
-      return send(res, 200, { user: safeUser(auth.user) });
-    }
-
-    if (settingsMatch && req.method === 'GET') {
-      if (!canManageUsers(auth.user)) return send(res, 403, { error: 'Admin access required.' });
-      writeAccounts(accounts);
-      return send(res, 200, { settings: accountSettings(accounts) });
-    }
-
-    if (settingsMatch && req.method === 'PATCH') {
-      if (!canManageUsers(auth.user)) return send(res, 403, { error: 'Admin access required.' });
-      const body = await readBody(req);
-      const settings = accountSettings(accounts);
-      if (body.allowGuestJoins !== undefined) settings.allowGuestJoins = !!body.allowGuestJoins;
-      addAudit(accounts, auth.user, 'settings.updated', { allowGuestJoins: settings.allowGuestJoins });
-      writeAccounts(accounts);
-      return send(res, 200, { settings });
-    }
-
-    if (inviteMatch) {
-      if (!canManageUsers(auth.user)) return send(res, 403, { error: 'Admin access required.' });
-
-      if (!inviteMatch[1] && req.method === 'GET') {
-        writeAccounts(accounts);
-        return send(res, 200, { invites: Object.values(accounts.invites || {}).map(safeInvite).reverse().slice(0, 100) });
-      }
-
-      if (!inviteMatch[1] && req.method === 'POST') {
-        const body = await readBody(req);
-        let codeKey = generateInviteCode();
-        while (accounts.invites[codeKey]) codeKey = generateInviteCode();
-        const now = new Date();
-        const days = Math.max(1, Math.min(60, Number(body.expiresInDays || 14)));
-        const invite = {
-          code: codeKey,
-          displayName: String(body.displayName || body.name || 'Invited Player').trim().slice(0, 80) || 'Invited Player',
-          username: cleanUsername(body.username || ''),
-          role: cleanAccountRole(body.role, 'player'),
-          tableCodes: cleanTableCodes(body.tableCodes),
-          active: true,
-          createdAt: now.toISOString(),
-          createdBy: auth.user.id,
-          createdByName: auth.user.displayName || auth.user.username,
-          expiresAt: new Date(now.getTime() + days * 24 * 60 * 60 * 1000).toISOString(),
-          usedAt: null,
-          usedBy: null,
-        };
-        accounts.invites[codeKey] = invite;
-        addAudit(accounts, auth.user, 'invite.created', { code: codeKey, role: invite.role, tableCodes: invite.tableCodes });
-        writeAccounts(accounts);
-        return send(res, 201, { invite: safeInvite(invite) });
-      }
-
-      const codeKey = String(inviteMatch[1] || '').trim().toUpperCase().replace(/[^A-Z0-9]+/g, '');
-      const invite = accounts.invites?.[codeKey];
-      if (!invite) return send(res, 404, { error: 'Invite not found.' });
-
-      if (req.method === 'PATCH') {
-        const body = await readBody(req);
-        if (body.active !== undefined) invite.active = !!body.active;
-        if (body.expiresAt !== undefined) invite.expiresAt = body.expiresAt ? new Date(body.expiresAt).toISOString() : null;
-        addAudit(accounts, auth.user, 'invite.updated', { code: codeKey, active: invite.active });
-        writeAccounts(accounts);
-        return send(res, 200, { invite: safeInvite(invite) });
-      }
-    }
-
-    if (auditMatch && req.method === 'GET') {
-      if (!canManageUsers(auth.user)) return send(res, 403, { error: 'Admin access required.' });
-      writeAccounts(accounts);
-      return send(res, 200, { audit: accounts.audit.slice().reverse().slice(0, 100) });
-    }
-
-    if (accountMatch) {
-      if (!canManageUsers(auth.user)) return send(res, 403, { error: 'Admin access required.' });
-      const userId = accountMatch[1] ? decodeURIComponent(accountMatch[1]) : null;
-
-      if (!userId && req.method === 'GET') {
-        writeAccounts(accounts);
-        return send(res, 200, { users: Object.values(accounts.users || {}).map(safeUser) });
-      }
-
-      if (!userId && req.method === 'POST') {
-        const body = await readBody(req);
-        const username = cleanUsername(body.username || body.displayName || body.name);
-        if (!username) return send(res, 400, { error: 'Username is required' });
-        if (Object.values(accounts.users || {}).some(user => user.username === username)) {
-          return send(res, 409, { error: 'Username already exists.' });
-        }
-        const password = String(body.password || '').trim() || generatePassword();
-        const hashed = hashPassword(password);
-        const now = new Date().toISOString();
-        accounts.userSeq = Number(accounts.userSeq || 0) + 1;
-        const user = {
-          id: `user-${accounts.userSeq}`,
-          username,
-          displayName: String(body.displayName || body.name || username).trim().slice(0, 80) || username,
-          role: cleanAccountRole(body.role, 'player'),
-          tableCodes: cleanTableCodes(body.tableCodes),
-          active: body.active !== false,
-          passwordHash: hashed.hash,
-          passwordSalt: hashed.salt,
-          passwordIterations: hashed.iterations,
-          mustResetPassword: true,
-          createdAt: now,
-          updatedAt: now,
-        };
-        accounts.users[user.id] = user;
-        addAudit(accounts, auth.user, 'account.created', { userId: user.id, username: user.username, role: user.role });
-        writeAccounts(accounts);
-        return send(res, 201, { user: safeUser(user), temporaryPassword: password });
-      }
-
-      const user = accounts.users?.[userId];
-      if (!user) return send(res, 404, { error: 'User not found' });
-
-      if (userId && req.method === 'PATCH') {
-        const body = await readBody(req);
-        let temporaryPassword = null;
-        if (body.displayName !== undefined) user.displayName = String(body.displayName || user.displayName).trim().slice(0, 80) || user.displayName;
-        if (body.role !== undefined) user.role = cleanAccountRole(body.role, user.role);
-        if (body.tableCodes !== undefined) user.tableCodes = cleanTableCodes(body.tableCodes);
-        if (body.active !== undefined) user.active = !!body.active;
-        if (body.resetPassword) {
-          temporaryPassword = generatePassword();
-          const hashed = hashPassword(temporaryPassword);
-          user.passwordHash = hashed.hash;
-          user.passwordSalt = hashed.salt;
-          user.passwordIterations = hashed.iterations;
-          user.mustResetPassword = true;
-          Object.keys(accounts.sessions || {}).forEach(token => {
-            if (accounts.sessions[token]?.userId === user.id) delete accounts.sessions[token];
-          });
-        }
-        user.updatedAt = new Date().toISOString();
-        addAudit(accounts, auth.user, body.resetPassword ? 'account.password_reset' : 'account.updated', { userId: user.id, username: user.username, role: user.role, active: user.active });
-        writeAccounts(accounts);
-        return send(res, 200, { user: safeUser(user), temporaryPassword });
-      }
-    }
-
-    writeAccounts(accounts);
-    return send(res, 404, { error: 'Not found' });
-  }
 
   const streamMatch = pathname.match(/^\/api\/tables\/([A-Z0-9]{4,10})\/stream$/i);
   if (streamMatch && req.method === 'GET') {
@@ -1684,11 +1610,10 @@ async function handleApi(req, res, pathname) {
       const auth = authenticatedUser(req, accounts);
       writeAccounts(accounts);
       if (!auth?.user) return send(res, 401, { error: 'Login required.' });
-      if (!['owner', 'admin', 'warden'].includes(auth.user.role)) return send(res, 403, { error: 'Warden or Admin account required.' });
       const data = readTables();
       const tables = Object.values(data.tables || {})
         .map(table => normalizeTable(table))
-        .filter(table => canAccessTableCode(auth.user, table.code))
+        .filter(table => canAccessTableCode(auth.user, table.code) && !table.memberships?.[auth.user.id]?.removed)
         .map(table => tableSummary(table, accounts))
         .sort((a, b) => String(b.updatedAt || '').localeCompare(String(a.updatedAt || '')));
       writeTables(data);
@@ -1704,7 +1629,13 @@ async function handleApi(req, res, pathname) {
   if (req.method === 'POST' && pathname === '/api/tables') {
     const body = await readBody(req);
     const data = readTables();
-    if (!enforceTableCreate(req, res)) return;
+    const access = enforceTableCreate(req, res);
+    if (!access) return;
+    if (access.user.mustResetPassword) return send(res, 428, { error: 'Change your temporary password first.' });
+    requestContext.getStore().user = access.user;
+    body.clientId = access.user.id;
+    body.playerName = access.user.displayName;
+    body.role = 'warden';
     let next = code();
     while (data.tables[next]) next = code();
     const now = new Date().toISOString();
@@ -1714,6 +1645,10 @@ async function handleApi(req, res, pathname) {
       rev: 1,
       snapshot: body.snapshot || {},
       players: {},
+      memberships: { [access.user.id]: { role: 'warden', joinedAt: now } },
+      ownerId: access.user.id,
+      wardenId: access.user.id,
+      personal: {},
       status: 'lobby',
       locked: false,
       archived: false,
@@ -1745,6 +1680,8 @@ async function handleApi(req, res, pathname) {
     if (player) addEvent(table, { type: 'table.created', text: activityText('table.created', player) }, player);
     if (player) addCheckpoint(table, { name: 'Opening checkpoint', note: 'Saved when the remote table was created.' }, player, 'table-created');
     data.tables[next] = table;
+    access.user.tableCodes = [...new Set([...(access.user.tableCodes || []), next])];
+    writeAccounts(access.accounts);
     writeTables(data);
     return send(res, 201, tablePayload(table));
   }
@@ -1798,6 +1735,14 @@ async function handleApi(req, res, pathname) {
       const status = String(body.status || '').trim().toLowerCase();
       if (!['lobby', 'live', 'paused'].includes(status)) return send(res, 400, { error: 'Status must be lobby, live, or paused.' });
       table.status = status;
+      if (status === 'paused') {
+        if (!['hold', 'snuff'].includes(readSnapshotJSON(table, 'vg_signals', []).at(-1)?.tier)) {
+          const signal = addEvent(table, { type: 'safety.signal', detail: { tier: 'hold' }, text: `${actor.name} paused the table for a break.` }, actor);
+          applyMemberAction(table, signal, actor);
+        }
+        table.savedAt = new Date().toISOString();
+        addCheckpoint(table, { name: 'Saved for a break', note: 'Resume this table from the member home.' }, actor, 'break');
+      }
       eventText = `${actor.name || 'Warden'} changed table status to ${status}.`;
     }
     if (body.transferWardenTo !== undefined) {
@@ -1805,14 +1750,18 @@ async function handleApi(req, res, pathname) {
       const target = table.players?.[targetId];
       if (!target) return send(res, 404, { error: 'Target player not found.' });
       Object.values(table.players || {}).forEach(player => {
-        if (player.role === 'warden') player.role = player.id === targetId ? 'warden' : 'protagonist';
+        if (player.role === 'warden') {
+          player.role = player.id === targetId ? 'warden' : 'protagonist';
+          table.memberships[player.id] = { ...table.memberships[player.id], role: player.role };
+        }
       });
       target.role = 'warden';
+      table.wardenId = targetId;
+      table.memberships[targetId] = { ...table.memberships[targetId], role: 'warden', removed: false };
       eventType = 'warden.transferred';
       eventText = `${actor.name || 'Admin'} transferred Warden control to ${target.name || 'a player'}.`;
     }
 
-    table.rev += 1;
     table.updatedAt = new Date().toISOString();
     table.updatedBy = actor.id;
     addEvent(table, { type: eventType, text: eventText, detail: { locked: table.locked, archived: table.archived, status: table.status } }, actor);
@@ -1838,13 +1787,15 @@ async function handleApi(req, res, pathname) {
       const id = decodeURIComponent(playerMatch[2]);
       const player = table.players?.[id];
       if (!player) return send(res, 404, { error: 'Player not found.' });
+      if (id === access.user.id || player.role === 'warden') return send(res, 409, { error: 'Transfer the Warden seat before removing it.' });
       const actor = actorPlayer(access.user);
       delete table.players[id];
+      table.memberships[id] = { ...table.memberships[id], role: player.role, removed: true, removedAt: new Date().toISOString() };
+      closeSessions(id);
       if (table.flow?.focusClientId === id) {
         table.flow.focusClientId = '';
         table.flow.focusName = '';
       }
-      table.rev += 1;
       table.updatedAt = new Date().toISOString();
       table.updatedBy = actor.id;
       addEvent(table, {
@@ -1879,8 +1830,7 @@ async function handleApi(req, res, pathname) {
       } else if (body.ready !== undefined && !!previous.ready !== !!player.ready) {
         addEvent(table, { type: 'player.ready', text: activityText('player.ready', player, { ready: player.ready }), detail: { ready: player.ready } }, player);
       }
-      table.rev += 1;
-      table.updatedBy = player.id;
+      table.memberships[id] = { ...table.memberships[id], role: player.role, removed: false };
       data.tables[tableCode] = table;
       writeTables(data);
       broadcastTable(tableCode, previous ? 'player.updated' : 'player.joined', table);
@@ -2247,10 +2197,11 @@ async function handleApi(req, res, pathname) {
         approvalRequired: !!body.approvalRequired,
       }, player);
       if (!event) return send(res, 400, { error: 'Event could not be recorded' });
+      if (event.status !== 'pending') applyMemberAction(table, event, player);
       data.tables[tableCode] = table;
       writeTables(data);
       broadcastTable(tableCode, 'event.created', table);
-      return send(res, event.status === 'pending' ? 202 : 201, { ...eventsPayload(table, 0, true), event });
+      return send(res, event.status === 'pending' ? 202 : 201, { ...eventsPayload(table, 0, true), event, table: tablePayload(table) });
     }
 
     if (eventId && req.method === 'PATCH') {
@@ -2323,7 +2274,9 @@ async function handleApi(req, res, pathname) {
         return send(res, 403, { error: 'Only the Warden can sync shared table state.', table: tablePayload(table) });
       }
       table.rev += 1;
+      table.authoringRev = table.rev;
       table.snapshot = body.snapshot || {};
+      table.savedAt = new Date().toISOString();
       table.updatedAt = new Date().toISOString();
       table.updatedBy = body.clientId || null;
       if (body.autoCheckpoint !== false) {
@@ -2344,30 +2297,96 @@ async function handleApi(req, res, pathname) {
 }
 
 function serveStatic(req, res, pathname) {
-  let filePath = path.normalize(path.join(ROOT, pathname));
-  if (!filePath.startsWith(ROOT)) return send(res, 403, 'Forbidden');
-  if (pathname.endsWith('/')) filePath = path.join(filePath, 'index.html');
+  const aliases = { '/': '/index.html', '/login': '/index.html', '/player/': '/player/player.html', '/admin/': '/admin/index.html', '/dice/': '/dice/index.html' };
+  pathname = aliases[pathname] || pathname;
+  const publicFile = pathname === '/index.html' || /^\/(assets|engine)\/[a-zA-Z0-9_./-]+\.(js|css|png|jpg|webp|woff2)$/.test(pathname);
+  const memberFile = ['/members.html', '/member-admin.html', '/admin/index.html', '/player/player.html', '/map/dm-map.html', '/map/player-map.html', '/dice/index.html', '/pause.html', '/compact/SAFETY.md', '/compact/TAGS.md', '/demo/demo-data.js'].includes(pathname);
+  if (!publicFile && !memberFile) return send(res, 404, 'Not found');
+  if (memberFile) {
+    const auth = members.auth(req);
+    if (!auth || auth.user.mustResetPassword) return send(res, 303, '', { Location: '/' });
+    const elevated = ['owner', 'admin', 'warden'].includes(auth.user.role) || Object.values(readTables().tables).some(table => canAccessTableCode(auth.user, table.code) && tableRole(table, auth.user) === 'warden');
+    if ((pathname === '/admin/index.html' || pathname === '/map/dm-map.html') && !elevated) return send(res, 403, 'Warden access required');
+    if (pathname === '/member-admin.html' && !canManageUsers(auth.user)) return send(res, 403, 'Member administrator access required');
+  }
+  let filePath = path.resolve(ROOT, `.${pathname}`);
+  if (!filePath.startsWith(`${ROOT}${path.sep}`)) return send(res, 403, 'Forbidden');
   if (!fs.existsSync(filePath) || fs.statSync(filePath).isDirectory()) {
     return send(res, 404, 'Not found');
   }
   const ext = path.extname(filePath).toLowerCase();
   res.writeHead(200, {
     'Content-Type': MIME[ext] || 'application/octet-stream',
-    'Cache-Control': ext === '.html' ? 'no-store' : 'public, max-age=60',
+    'Cache-Control': ext === '.html' || memberFile ? 'no-store' : 'public, max-age=300',
   });
   fs.createReadStream(filePath).pipe(res);
 }
 
+const rateBuckets = new Map();
+function rateLimit(req, pathname) {
+  const category = pathname.match(/\/api\/accounts\/(login|bootstrap|invites|password)/)?.[1];
+  if (!category) return false;
+  const key = `${String(req.headers['x-forwarded-for'] || req.socket.remoteAddress).split(',')[0]}:${category}`;
+  const now = Date.now();
+  const old = rateBuckets.get(key);
+  const bucket = old && old.until > now ? old : { until: now + 60000, count: 0 };
+  rateBuckets.set(key, bucket); bucket.count += 1;
+  if (rateBuckets.size > 10000) for (const [id, entry] of rateBuckets) if (entry.until <= now) rateBuckets.delete(id);
+  if (rateBuckets.size > 10000) rateBuckets.delete(rateBuckets.keys().next().value);
+  return bucket.count > (category === 'login' ? 15 : 30);
+}
+
 const server = http.createServer(async (req, res) => {
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('X-Frame-Options', 'DENY');
+  res.setHeader('Referrer-Policy', 'no-referrer');
+  res.setHeader('Content-Security-Policy', "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: blob:; connect-src 'self' https://discord.com; object-src 'none'; base-uri 'self'; frame-ancestors 'none'; form-action 'self'");
+  res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=()');
+  if (process.env.NODE_ENV === 'production') res.setHeader('Strict-Transport-Security', 'max-age=31536000');
   try {
     const url = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
-    if (url.pathname.startsWith('/api/')) return await handleApi(req, res, url.pathname);
+    if (process.env.NODE_ENV === 'production' && req.headers.host === 'www.velvetgrimore.xyz') return send(res, 308, '', { Location: `https://velvetgrimore.xyz${url.pathname}${url.search}` });
+    if (url.pathname.startsWith('/api/')) {
+      if (rateLimit(req, url.pathname)) return send(res, 429, { error: 'Too many attempts. Please wait a minute.' }, { 'Retry-After': '60' });
+      if (!['GET', 'HEAD'].includes(req.method) && req.headers.origin && req.headers.origin !== publicUrl(req)) return send(res, 403, { error: 'This request must come from Velvet Grimoire.' });
+      req.parsedBody = await readBody(req);
+      const task = async () => requestContext.run({ user: members.auth(req)?.user || null, transaction: true }, async () => {
+        try {
+          store.begin();
+          if (url.pathname.startsWith('/api/accounts')) await members.handle(req, res, url.pathname);
+          else if (url.pathname === '/api/health') await handleApi(req, res, url.pathname);
+          else {
+            const auth = members.auth(req);
+            if (!auth) return send(res, 401, { error: 'Sign in to continue.' });
+            if (auth.user.mustResetPassword) return send(res, 428, { error: 'Change your temporary password to continue.' });
+            if (!protectTableRequest(req, res, url)) return;
+            await handleApi(req, res, url.pathname);
+          }
+          store.commit();
+        } catch (err) {
+          store.rollback();
+          console.error('Request failed:', err.code || err.name);
+          if (!res.headersSent) send(res, 400, { error: 'The action could not be saved. Try again.' });
+        }
+      });
+      const running = apiQueue.then(task, task);
+      apiQueue = running.catch(() => {});
+      await running;
+      return;
+    }
     return serveStatic(req, res, decodeURIComponent(url.pathname));
   } catch (err) {
     return send(res, err.message === 'Body too large' ? 413 : 400, { error: err.message || 'Bad request' });
   }
 });
 
-server.listen(PORT, '0.0.0.0', () => {
+server.requestTimeout = 30000;
+server.headersTimeout = 10000;
+server.listen(PORT, process.env.HOST || '0.0.0.0', () => {
   console.log(`Velvet Grimoire backend listening on http://localhost:${PORT}/`);
+});
+
+process.on('SIGTERM', () => {
+  for (const clients of liveStreams.values()) for (const client of clients) { clearInterval(client.keepalive); client.res.end(); }
+  server.close(() => { store.close(); process.exit(0); });
 });

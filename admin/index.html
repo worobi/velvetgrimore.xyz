@@ -4,16 +4,6 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Velvet Grimoire — DM Admin</title>
-<!-- ── Role guard: redirect non-DMs back to landing ───────────── -->
-<script>
-(function () {
-  var role = localStorage.getItem('vg_role');
-  if (role !== 'dm') {
-    // No role set, or set to player. Bounce to landing so they can pick.
-    location.replace('/?reason=dm-only');
-  }
-})();
-</script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@400;600;700&family=Crimson+Pro:ital,wght@0,300;0,400;0,600;1,300;1,400&display=swap" rel="stylesheet">
 <style>
@@ -739,7 +729,7 @@ hr.divider { border: none; border-top: 1px solid var(--border); margin: 24px 0; 
         <button class="btn btn-ghost btn-sm" onclick="syncNow()">Sync Now</button>
         <button class="btn btn-ghost btn-sm" onclick="refreshLobby()">Refresh Lobby</button>
         <button class="btn btn-gold btn-sm" onclick="toggleReady()">Toggle Ready</button>
-        <button class="btn btn-ghost btn-sm" onclick="stopSync()">Stop Sync</button>
+        <button class="btn btn-ghost btn-sm" onclick="stopSync()">Save and Leave</button>
       </div>
       <div id="syncStatus" style="font-size:13px;color:var(--text-dim);line-height:1.7;margin-top:12px;">Remote sync is off.</div>
       <div id="syncLobby" style="display:grid;gap:8px;margin-top:12px;"></div>
@@ -754,55 +744,7 @@ hr.divider { border: none; border-top: 1px solid var(--border); margin: 24px 0; 
         <div id="tableAuditPanel" style="display:grid;gap:8px;max-height:180px;overflow:auto;background:rgba(0,0,0,0.18);border:1px solid var(--border);border-radius:6px;padding:10px;"></div>
       </div>
       <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(290px,1fr));gap:12px;margin-top:14px;align-items:start;">
-      <div style="border-top:1px solid var(--border);padding-top:12px;">
-        <div style="font-family:'Cinzel',serif;color:var(--gold);font-size:12px;letter-spacing:1px;text-transform:uppercase;margin-bottom:8px;">Accounts</div>
-        <div id="accountStatus" style="font-size:13px;color:var(--text-dim);line-height:1.6;margin-bottom:8px;">Checking account setup...</div>
-        <div style="display:grid;gap:8px;margin-bottom:10px;">
-          <input type="text" id="accountLoginUsername" placeholder="Username">
-          <input type="password" id="accountLoginPassword" placeholder="Password" onkeydown="if(event.key==='Enter') loginAccount()">
-          <div class="flex gap-8" style="flex-wrap:wrap;">
-            <button class="btn btn-gold btn-sm" onclick="loginAccount()">Login</button>
-            <button class="btn btn-ghost btn-sm" onclick="bootstrapOwnerAccount()">First Owner</button>
-            <button class="btn btn-ghost btn-sm" onclick="logoutAccount()">Logout</button>
-          </div>
-        </div>
-        <div style="border-top:1px solid var(--border);padding-top:10px;display:grid;gap:8px;">
-          <input type="text" id="accountNewName" placeholder="Display name">
-          <input type="text" id="accountNewUsername" placeholder="Username">
-          <select id="accountNewRole">
-            <option value="player">Player</option>
-            <option value="spectator">Spectator</option>
-            <option value="warden">Warden</option>
-            <option value="admin">Admin</option>
-          </select>
-          <input type="text" id="accountNewTables" placeholder="Table codes, comma separated">
-          <button class="btn btn-gold btn-sm" onclick="createAccountUser()">Generate User</button>
-        </div>
-        <div style="border-top:1px solid var(--border);padding-top:10px;margin-top:10px;display:grid;gap:8px;">
-          <label style="display:flex;gap:8px;align-items:center;font-size:13px;color:var(--text-dim);line-height:1.4;">
-            <input type="checkbox" id="accountGuestToggle" style="width:auto;">
-            Allow guest joins by table code
-          </label>
-          <button class="btn btn-ghost btn-sm" onclick="saveAccountSettings()">Save Access Setting</button>
-        </div>
-        <div style="border-top:1px solid var(--border);padding-top:10px;margin-top:10px;display:grid;gap:8px;">
-          <div style="font-family:'Cinzel',serif;color:var(--gold);font-size:12px;letter-spacing:1px;text-transform:uppercase;">Invite Link</div>
-          <input type="text" id="accountInviteName" placeholder="Display name">
-          <input type="text" id="accountInviteUsername" placeholder="Username, optional">
-          <select id="accountInviteRole">
-            <option value="player">Player</option>
-            <option value="spectator">Spectator</option>
-            <option value="warden">Warden</option>
-            <option value="admin">Admin</option>
-          </select>
-          <input type="text" id="accountInviteTables" placeholder="Table codes, comma separated">
-          <button class="btn btn-gold btn-sm" onclick="createAccountInvite()">Create Invite</button>
-          <div id="accountInviteGenerated" style="font-size:13px;color:var(--gold);line-height:1.6;"></div>
-          <div id="accountInviteList" style="display:grid;gap:8px;max-height:180px;overflow:auto;background:rgba(0,0,0,0.18);border:1px solid var(--border);border-radius:6px;padding:10px;"></div>
-        </div>
-        <div id="accountGenerated" style="font-size:13px;color:var(--gold);line-height:1.6;margin-top:8px;"></div>
-        <div id="accountUserList" style="display:grid;gap:8px;max-height:260px;overflow:auto;background:rgba(0,0,0,0.18);border:1px solid var(--border);border-radius:6px;padding:10px;margin-top:10px;"></div>
-      </div>
+      <div><a href="/members.html">Your saved tables</a></div>
       <div style="border-top:1px solid var(--border);padding-top:12px;">
         <div style="font-family:'Cinzel',serif;color:var(--gold);font-size:12px;letter-spacing:1px;text-transform:uppercase;margin-bottom:8px;">Table Flow</div>
         <div id="syncFlowSummary" style="font-size:13px;color:var(--text-dim);line-height:1.6;margin-bottom:8px;">No spotlight set.</div>
@@ -1313,6 +1255,7 @@ hr.divider { border: none; border-top: 1px solid var(--border); margin: 24px 0; 
 <script src="../engine/engine.js"></script>
 <script src="../engine/intimacy.js"></script>
 <script src="../engine/sync.js"></script>
+<script src="/engine/member-bar.js"></script>
 <script src="../demo/demo-data.js"></script>
 <script>
 
@@ -1348,11 +1291,12 @@ let activeSafetySignal = null;
 window.onload = () => {
   renderCampaigns();
   loadWebhookStatus();
-  VGEngine.resumeSession();
+  const restored = VGEngine.resumeSession();
   initRemoteSync();
   const latest = VGEngine.getLatestSignal ? VGEngine.getLatestSignal() : null;
   activeSafetySignal = latest || null;
   if (!lastProcessedSignalAt && latest?.at) lastProcessedSignalAt = latest.at;
+  if (restored?.id) showPanel('session');
   setInterval(pollSafetyRuntime, 2000);
   window.addEventListener('storage', onSharedStateChange);
 };
@@ -2661,11 +2605,10 @@ async function syncNow() {
   updateSyncStatus(VGSync.status());
 }
 
-function stopSync() {
+async function stopSync() {
   if (!window.VGSync) return;
-  VGSync.stop();
-  toast('Remote sync stopped.', 'warn');
-  updateSyncStatus(VGSync.status());
+  try { await VGSync.flush(); VGSync.stop(); location.assign('/members.html'); }
+  catch (error) { toast(error.message, 'error'); }
 }
 
 async function sendSyncChat() {
@@ -3658,7 +3601,7 @@ function renderIntimacyPanel(role, session, scene, holdActive) {
         </div>
         <div>
           <label>Heat / tension</label>
-          <input type="range" min="0" max="100" value="${state.heat}" oninput="setIntimacyHeat(this.value)" ${holdActive ? 'disabled' : ''}>
+          <input type="range" min="0" max="100" value="${state.heat}" onchange="setIntimacyHeat(this.value)" ${holdActive ? 'disabled' : ''}>
           <div class="heat-track"><div class="heat-fill" style="width:${state.heat}%"></div></div>
         </div>
       </div>
@@ -3725,18 +3668,18 @@ function getIntimacyContext() {
   return { session, scene };
 }
 
-function setIntimacyConsent(role, level) {
+async function setIntimacyConsent(role, level) {
   const ctx = getIntimacyContext();
   if (!ctx || !window.VGIntimacy) return;
-  VGIntimacy.setConsent(ctx.session.id, ctx.scene.id, role, level);
+  try { await VGIntimacy.setConsent(ctx.session.id, ctx.scene.id, role, level); } catch (error) { toast(error.message, 'error'); return; }
   if (level === 'veil') toast('Veil selected. Turn the camera away or move to Hearth.', 'warn');
   renderSession();
 }
 
-function setIntimacyHeat(value) {
+async function setIntimacyHeat(value) {
   const ctx = getIntimacyContext();
   if (!ctx || !window.VGIntimacy) return;
-  VGIntimacy.setHeat(ctx.session.id, ctx.scene.id, value);
+  try { await VGIntimacy.setHeat(ctx.session.id, ctx.scene.id, value); } catch (error) { toast(error.message, 'error'); return; }
   renderSession();
 }
 
@@ -3748,7 +3691,7 @@ function insertIntimacyPrompt(role, text, heat) {
   input.focus();
 }
 
-function sendIntimacyMessage(role) {
+async function sendIntimacyMessage(role) {
   if (activeSafetySignal?.tier === 'hold') {
     toast('Hold is active. Resume before sending.', 'warn');
     return;
@@ -3758,47 +3701,35 @@ function sendIntimacyMessage(role) {
   const input = document.getElementById(`intimacyText-${role}`);
   const mode = document.getElementById(`intimacyMode-${role}`)?.value || 'spoken';
   const heatDelta = Number(input?.dataset.heat || 0);
-  const sent = VGIntimacy.sendMessage({
+  const sent = await VGIntimacy.sendMessage({
     sessionId: ctx.session.id,
     sceneId: ctx.scene.id,
     role,
     mode,
     text: input?.value || '',
     heatDelta,
-  });
+  }).catch(error => { toast(error.message, 'error'); return null; });
   if (sent && input) {
     input.value = '';
     input.dataset.heat = '0';
-    recordSyncEvent('intimacy.message', {
-      sceneId: ctx.scene.id,
-      sceneTitle: ctx.scene.title,
-      role,
-      mode,
-      heatDelta,
-    });
     renderSession();
   }
 }
 
-function saveIntimacyCard(role) {
+async function saveIntimacyCard(role) {
   const ctx = getIntimacyContext();
   if (!ctx || !window.VGIntimacy) return;
   const want = [...document.querySelectorAll(`[data-want-${role}]`)]
     .filter(el => el.checked)
     .map(el => el.getAttribute(`data-want-${role}`));
-  VGIntimacy.saveCard(ctx.session.id, ctx.scene.id, role, {
+  const saved = await VGIntimacy.saveCard(ctx.session.id, ctx.scene.id, role, {
     want,
     pace: document.getElementById(`intimacyPace-${role}`)?.value || 'slow',
     ceiling: document.getElementById(`intimacyCeiling-${role}`)?.value || 'suggestive',
     notTonight: document.getElementById(`intimacyNotTonight-${role}`)?.value || '',
     note: document.getElementById(`intimacyNote-${role}`)?.value || '',
-  });
-  recordSyncEvent('intimacy.card', {
-    sceneId: ctx.scene.id,
-    sceneTitle: ctx.scene.title,
-    role,
-    wantCount: want.length,
-  });
+  }).catch(error => { toast(error.message, 'error'); return null; });
+  if (!saved) return;
   toast('Intimate table card saved.', 'success');
   renderSession();
 }
