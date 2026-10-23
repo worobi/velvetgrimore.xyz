@@ -12,6 +12,14 @@ if ($application->git_repository !== 'worobi/velvetgrimore.xyz') {
     throw new RuntimeException('Unexpected application source.');
 }
 $application->ports_exposes = '8080';
+if ($application->custom_labels) {
+    $labels = base64_decode($application->custom_labels, true);
+    if ($labels === false) {
+        throw new RuntimeException('Invalid stored proxy labels.');
+    }
+    $labels = preg_replace('/(traefik\.http\.services\.[^=\r\n]+\.loadbalancer\.server\.port)=\d+/', '$1=8080', $labels);
+    $application->custom_labels = base64_encode($labels);
+}
 $application->health_check_enabled = true;
 $application->health_check_path = '/api/health';
 $application->health_check_port = '8080';
