@@ -68,6 +68,23 @@ test('members-only invitations, protected play, durable saves, and revocation', 
   const accepted = await api('/api/accounts/invites/accept', { method: 'POST', body: { token, email: 'member@example.test', displayName: 'Test Member', password: 'Member-password-12345', adultConfirmed: true } });
   assert.equal(accepted.status, 201, JSON.stringify(accepted.data)); const memberCookie = accepted.cookie; const memberId = accepted.data.user.id;
   assert.equal((await api('/api/accounts/invites/accept', { method: 'POST', body: { token } })).status, 404);
+  // Story ideas are durable and scoped to the signed-in member, with admin-only review.
+  assert.equal((await api('/stories.html')).status, 303);
+  assert.equal((await api('/stories.html', { cookie: memberCookie })).status, 200);
+  assert.equal((await api('/api/story-submissions')).status, 401);
+  const storyBody = { requestId: require('node:crypto').randomUUID(), title: 'The Missing Map', premise: 'A cartographer vanishes.', boundaries: 'No gore' };
+  assert.equal((await api('/api/story-submissions', { cookie: memberCookie, method: 'POST', headers: { origin: 'https://elsewhere.invalid' }, body: storyBody })).status, 403);
+  const tale = await api('/api/story-submissions', { cookie: memberCookie, method: 'POST', body: storyBody });
+  assert.equal(tale.status, 201, JSON.stringify(tale.data));
+  const talePath = '/api/story-submissions/' + tale.data.submission.id;
+  assert.equal((await api('/api/story-submissions', { cookie: memberCookie, method: 'POST', body: storyBody })).data.submission.id, tale.data.submission.id);
+  assert.equal((await api('/api/story-submissions', { cookie: memberCookie })).data.submissions.length, 1);
+  assert.equal((await api('/api/story-submissions', { cookie: ownerCookie })).data.canReview, true);
+  const reviewBody = { status: 'reviewing', reviewNotes: 'PRIVATE_STORY_REVIEW', updatedAt: tale.data.submission.updatedAt };
+  assert.equal((await api(talePath, { cookie: memberCookie, method: 'PATCH', body: reviewBody })).status, 403);
+  assert.equal((await api(talePath, { cookie: ownerCookie, method: 'PATCH', body: reviewBody })).status, 200);
+  assert.ok(!JSON.stringify((await api(talePath, { cookie: memberCookie })).data).includes('PRIVATE_STORY_REVIEW'));
+
   const directoryResult = await api('/api/tables', { cookie: memberCookie }); assert.equal(directoryResult.status, 200); assert.equal(directoryResult.data.tables.length, 1);
   const joined = await api(`${table}/players`, { cookie: memberCookie, method: 'POST', body: {} }); assert.equal(joined.status, 200, JSON.stringify(joined.data));
   assert.ok(!JSON.stringify(joined.data).includes('WARDEN_SECRET')); assert.ok(!JSON.stringify(joined.data).includes('UNREVEALED_SECRET')); assert.ok(JSON.stringify(joined.data).includes('Shared story'));
@@ -107,6 +124,7 @@ test('members-only invitations, protected play, durable saves, and revocation', 
   const memberLogin = await api('/api/accounts/login', { method: 'POST', body: { email: 'member@example.test', password: 'Member-password-12345' } }); assert.equal(memberLogin.status, 200);
   assert.equal((await api(`${table}/manage`, { cookie: ownerCookie, method: 'PATCH', body: { status: 'paused' } })).status, 200);
   await stop(); await start();
+  assert.equal((await api(talePath, { cookie: ownerCookie })).data.submission.reviewNotes, 'PRIVATE_STORY_REVIEW');
   const restored = await api(table, { cookie: ownerCookie }); assert.equal(restored.status, 200); assert.equal(restored.data.name, 'Saved Table'); assert.equal(restored.data.status, 'paused'); assert.ok(restored.data.savedAt); assert.ok(restored.data.snapshot.keys.vg_intimacy_chat.includes('Saved player message'));
   assert.equal((await api(`${table}/players/${memberId}`, { cookie: ownerCookie, method: 'DELETE' })).status, 200);
   assert.equal((await api(`${table}/presence`, { cookie: memberLogin.cookie, method: 'POST', body: {} })).status, 403);

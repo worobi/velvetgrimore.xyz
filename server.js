@@ -9,6 +9,7 @@ const { AsyncLocalStorage } = require('async_hooks');
 const openStore = require('./lib/store');
 const createMail = require('./lib/mail');
 const createMembers = require('./lib/members');
+const createStorySubmissions = require('./lib/story-submissions');
 const privacy = require('./lib/privacy');
 
 const ROOT = __dirname;
@@ -18,6 +19,7 @@ const ACCOUNTS_FILE = path.join(DATA_DIR, 'accounts.json');
 const PORT = Number(process.env.PORT || 8765);
 const store = openStore(DATA_DIR);
 const mail = createMail(store, DATA_DIR);
+const storySubmissions = createStorySubmissions({ store, send, readBody });
 const requestContext = new AsyncLocalStorage();
 let apiQueue = Promise.resolve();
 const PLAYER_ROLES = new Set(['warden', 'protagonist', 'boss', 'spectator']);
@@ -1594,6 +1596,9 @@ function openLiveStream(req, res, tableCode) {
 }
 
 async function handleApi(req, res, pathname) {
+  if (pathname === '/api/story-submissions' || pathname.startsWith('/api/story-submissions/')) {
+    return storySubmissions(req, res, pathname, requestContext.getStore()?.user);
+  }
   if (req.method === 'GET' && pathname === '/api/health') {
     return send(res, store.healthy() ? 200 : 503, { ok: store.healthy(), service: 'velvet-grimoire-sync', version: '16.0.0' });
   }
@@ -2300,7 +2305,7 @@ function serveStatic(req, res, pathname) {
   const aliases = { '/': '/index.html', '/login': '/index.html', '/player/': '/player/player.html', '/admin/': '/admin/index.html', '/dice/': '/dice/index.html' };
   pathname = aliases[pathname] || pathname;
   const publicFile = pathname === '/index.html' || /^\/(assets|engine)\/[a-zA-Z0-9_./-]+\.(js|css|png|jpg|webp|woff2)$/.test(pathname);
-  const memberFile = ['/members.html', '/member-admin.html', '/admin/index.html', '/player/player.html', '/map/dm-map.html', '/map/player-map.html', '/dice/index.html', '/pause.html', '/compact/SAFETY.md', '/compact/TAGS.md', '/demo/demo-data.js'].includes(pathname);
+  const memberFile = ['/members.html', '/stories.html', '/member-admin.html', '/admin/index.html', '/player/player.html', '/map/dm-map.html', '/map/player-map.html', '/dice/index.html', '/pause.html', '/compact/SAFETY.md', '/compact/TAGS.md', '/demo/demo-data.js'].includes(pathname);
   if (!publicFile && !memberFile) return send(res, 404, 'Not found');
   if (memberFile) {
     const auth = members.auth(req);
